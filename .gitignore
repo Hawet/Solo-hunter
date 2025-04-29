@@ -1,0 +1,6 @@
+deployer-key
+*.pub
+.vscode
+.env
+.terraform/
+.terraform.*
