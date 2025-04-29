@@ -4,3 +4,4 @@ deployer-key
 .env
 .terraform/
 .terraform.*
+node_modules/

@@ -7,24 +7,11 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/evepvp
-    depends_on:
-      - db
+
 
   frontend:
-    build: ./frontend
+    build: ./solo-hunter-web
     ports:
-      - "3000:3000"
+      - "4173:4173"
 
-  db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: evepvp
-    ports:
-      - "5432:5432"
-    volumes:
-      - db_data:/var/lib/postgresql/data
 
-volumes:
-  db_data:
