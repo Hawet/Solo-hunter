@@ -52,39 +52,80 @@
             <span class="time">{formatTime(kill.killmail_time)}</span>
           </div>
           
-          <div class="kill-details">
-            <div class="detail-row">
-              <span class="label">System ID:</span>
-              <span class="value">{kill.solar_system_id}</span>
-            </div>
-            
+          <div class="kill-content">
             {#if kill.victim}
-              <div class="detail-row">
-                <span class="label">Victim:</span>
-                <span class="value">
-                  {kill.victim.character_id ? `Char: ${kill.victim.character_id}` : 'Unknown'}
-                  {kill.victim.ship_type_id ? ` | Ship: ${kill.victim.ship_type_id}` : ''}
-                </span>
-              </div>
-              <div class="detail-row">
-                <span class="label">Damage Taken:</span>
-                <span class="value">{formatNumber(kill.victim.damage_taken)}</span>
+              <div class="participant victim">
+                <div class="participant-header">
+                  <span class="participant-label">Victim</span>
+                  <span class="damage">Damage: {formatNumber(kill.victim.damage_taken)}</span>
+                </div>
+                <div class="participant-info">
+                  {#if kill.victim.ship_icon}
+                    <img 
+                      src={kill.victim.ship_icon} 
+                      alt={kill.victim.ship_name || 'Ship'}
+                      class="ship-icon"
+                      on:error={(e) => e.target.style.display = 'none'}
+                    />
+                  {/if}
+                  <div class="participant-details">
+                    <div class="ship-name">
+                      {kill.victim.ship_name || `Ship ${kill.victim.ship_type_id || 'Unknown'}`}
+                    </div>
+                    <div class="character-name">
+                      {kill.victim.character_name || `Character ${kill.victim.character_id || 'Unknown'}`}
+                    </div>
+                    {#if kill.victim.corporation_name}
+                      <div class="corporation-name">
+                        {kill.victim.corporation_name}
+                      </div>
+                    {/if}
+                  </div>
+                </div>
               </div>
             {/if}
             
             {#if kill.attacker && kill.attacker.character_id}
-              <div class="detail-row">
-                <span class="label">Attacker:</span>
-                <span class="value">
-                  Char: {kill.attacker.character_id}
-                  {kill.attacker.ship_type_id ? ` | Ship: ${kill.attacker.ship_type_id}` : ''}
-                </span>
-              </div>
-              <div class="detail-row">
-                <span class="label">Damage Done:</span>
-                <span class="value">{formatNumber(kill.attacker.damage_done)}</span>
+              <div class="participant attacker">
+                <div class="participant-header">
+                  <span class="participant-label">Attacker</span>
+                  <span class="damage">Damage: {formatNumber(kill.attacker.damage_done)}</span>
+                </div>
+                <div class="participant-info">
+                  {#if kill.attacker.ship_icon}
+                    <img 
+                      src={kill.attacker.ship_icon} 
+                      alt={kill.attacker.ship_name || 'Ship'}
+                      class="ship-icon"
+                      on:error={(e) => e.target.style.display = 'none'}
+                    />
+                  {/if}
+                  <div class="participant-details">
+                    <div class="ship-name">
+                      {kill.attacker.ship_name || `Ship ${kill.attacker.ship_type_id || 'Unknown'}`}
+                    </div>
+                    <div class="character-name">
+                      {kill.attacker.character_name || `Character ${kill.attacker.character_id || 'Unknown'}`}
+                    </div>
+                    {#if kill.attacker.corporation_name}
+                      <div class="corporation-name">
+                        {kill.attacker.corporation_name}
+                      </div>
+                    {/if}
+                  </div>
+                </div>
               </div>
             {/if}
+            
+            <div class="system-info">
+              <span class="system-label">System:</span>
+              <span class="system-name">
+                {kill.solar_system_name || `System ${kill.solar_system_id}`}
+              </span>
+              {#if kill.region_name}
+                <span class="region-name">• {kill.region_name}</span>
+              {/if}
+            </div>
           </div>
         </div>
       {/each}
@@ -146,7 +187,9 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
 
   .kill-link {
@@ -167,27 +210,115 @@
     font-size: 0.85rem;
   }
 
-  .kill-details {
+  .kill-content {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .detail-row {
-    display: flex;
     gap: 1rem;
-    font-size: 0.9rem;
   }
 
-  .label {
+  .participant {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    padding: 0.75rem;
+    border-left: 3px solid;
+  }
+
+  .participant.victim {
+    border-left-color: #ef4444;
+  }
+
+  .participant.attacker {
+    border-left-color: #22c55e;
+  }
+
+  .participant-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .participant-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .participant.victim .participant-label {
+    color: #ef4444;
+  }
+
+  .participant.attacker .participant-label {
+    color: #22c55e;
+  }
+
+  .damage {
+    font-size: 0.8rem;
     color: #a0a0a0;
-    min-width: 120px;
+  }
+
+  .participant-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .ship-icon {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 4px;
+  }
+
+  .participant-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .ship-name {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #fff;
+  }
+
+  .character-name {
+    font-size: 0.9rem;
+    color: #e0e0e0;
+  }
+
+  .corporation-name {
+    font-size: 0.8rem;
+    color: #a0a0a0;
+    font-style: italic;
+  }
+
+  .system-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+
+  .system-label {
+    color: #a0a0a0;
     font-weight: 500;
   }
 
-  .value {
-    color: #e0e0e0;
-    flex: 1;
+  .system-name {
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .region-name {
+    color: #a0a0a0;
+    font-style: italic;
   }
 </style>
-

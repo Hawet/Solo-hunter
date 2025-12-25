@@ -49,5 +49,32 @@ async def health_check():
     global zkill_ws
     return {
         "status": "healthy",
-        "redisq_connected": zkill_ws.is_connected() if zkill_ws else False
+        "redisq_connected": zkill_ws.is_connected() if zkill_ws else False,
+        "paused": zkill_ws.is_paused() if zkill_ws else False
     }
+
+@app.post("/api/pause")
+async def pause_parsing():
+    """Pause parsing of killmails"""
+    global zkill_ws
+    if zkill_ws:
+        zkill_ws.pause()
+        return {"status": "paused", "message": "Parsing paused"}
+    return {"status": "error", "message": "RedisQ not initialized"}
+
+@app.post("/api/resume")
+async def resume_parsing():
+    """Resume parsing of killmails"""
+    global zkill_ws
+    if zkill_ws:
+        zkill_ws.resume()
+        return {"status": "resumed", "message": "Parsing resumed"}
+    return {"status": "error", "message": "RedisQ not initialized"}
+
+@app.get("/api/regions")
+async def get_region_stats():
+    """Get region activity statistics"""
+    global zkill_ws
+    if zkill_ws:
+        return {"regions": zkill_ws.get_region_stats()}
+    return {"regions": []}

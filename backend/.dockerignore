@@ -10,4 +10,6 @@ ENV/
 .git
 .gitignore
 *.md
-
+.pytest_cache/
+.coverage
+htmlcov/

@@ -15,7 +15,9 @@ class ZKillboardRedisQ:
         # RedisQ endpoint
         self.base_url = "https://zkillredisq.stream/listen.php"
         # ESI endpoint for fetching killmail data
-        self.esi_base_url = "https://esi.evetech.net/v1/killmails"
+        self.esi_base_url = "https://esi.evetech.net"
+        # EVE image CDN for ship icons
+        self.image_cdn = "https://images.evetech.net"
         
         # Generate unique queue ID if not provided
         self.queue_id = queue_id or f"solo-hunter-{uuid.uuid4().hex[:8]}"
@@ -27,6 +29,13 @@ class ZKillboardRedisQ:
         self.lock = asyncio.Lock()
         self.session: Optional[aiohttp.ClientSession] = None
         self._running = False
+        self._paused = False
+        self._pause_event = asyncio.Event()
+        self._pause_event.set()  # Start unpaused
+        
+        # Track region activity
+        self.region_stats: Dict[int, Dict] = {}  # region_id -> {name, count}
+        self.system_cache: Dict[int, Dict] = {}  # system_id -> {name, region_id, region_name}
         
     async def connect(self):
         """Start polling RedisQ for killmails"""
@@ -44,12 +53,18 @@ class ZKillboardRedisQ:
         
         while self._running:
             try:
-                await self._poll_redisq()
+                # Wait if paused (this will block until resume is called)
+                await self._pause_event.wait()
+                
+                # Only poll if not paused (double check after wait)
+                if not self._paused:
+                    await self._poll_redisq()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"RedisQ polling error: {type(e).__name__}: {e}")
-                await asyncio.sleep(5)  # Wait before retrying
+                if not self._paused:
+                    await asyncio.sleep(5)  # Wait before retrying
     
     async def _poll_redisq(self):
         """Poll RedisQ for new killmails"""
@@ -116,7 +131,7 @@ class ZKillboardRedisQ:
             return None
         
         try:
-            url = f"{self.esi_base_url}/{kill_id}/{hash_value}/"
+            url = f"{self.esi_base_url}/v1/killmails/{kill_id}/{hash_value}/"
             
             async with self.session.get(url) as response:
                 if response.status == 200:
@@ -131,6 +146,107 @@ class ZKillboardRedisQ:
         except Exception as e:
             print(f"Error fetching killmail from ESI: {e}")
             return None
+    
+    async def _resolve_names(self, ids: List[int]) -> Dict[int, str]:
+        """Resolve EVE IDs to names using ESI API"""
+        if not ids or not self.session:
+            return {}
+        
+        try:
+            url = f"{self.esi_base_url}/v2/universe/names/"
+            async with self.session.post(url, json=ids) as response:
+                if response.status == 200:
+                    names_data = await response.json()
+                    return {item['id']: item['name'] for item in names_data}
+                else:
+                    print(f"Failed to resolve names: {response.status}")
+                    return {}
+        except Exception as e:
+            print(f"Error resolving names: {e}")
+            return {}
+    
+    async def _get_ship_info(self, ship_type_id: int) -> Dict:
+        """Get ship type information including name"""
+        if not self.session:
+            return {"name": f"Ship {ship_type_id}", "icon_url": None}
+        
+        try:
+            url = f"{self.esi_base_url}/v3/universe/types/{ship_type_id}/"
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    type_data = await response.json()
+                    return {
+                        "name": type_data.get('name', f"Ship {ship_type_id}"),
+                        "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
+                    }
+                else:
+                    # Fallback: just return icon URL even if type lookup fails
+                    return {
+                        "name": f"Ship {ship_type_id}",
+                        "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
+                    }
+        except Exception as e:
+            print(f"Error fetching ship info: {e}")
+            return {
+                "name": f"Ship {ship_type_id}",
+                "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
+            }
+    
+    async def _get_system_info(self, system_id: int) -> Dict:
+        """Get system information including name and region"""
+        # Check cache first
+        if system_id in self.system_cache:
+            return self.system_cache[system_id]
+        
+        if not self.session:
+            return {"name": f"System {system_id}", "region_id": None, "region_name": None}
+        
+        try:
+            # Get system info
+            url = f"{self.esi_base_url}/v4/universe/systems/{system_id}/"
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    system_data = await response.json()
+                    system_name = system_data.get('name', f"System {system_id}")
+                    constellation_id = system_data.get('constellation_id')
+                    region_id = None
+                    region_name = None
+                    
+                    # Get constellation to find region
+                    if constellation_id:
+                        const_url = f"{self.esi_base_url}/v1/universe/constellations/{constellation_id}/"
+                        async with self.session.get(const_url) as const_response:
+                            if const_response.status == 200:
+                                const_data = await const_response.json()
+                                region_id = const_data.get('region_id')
+                                
+                                # Get region name
+                                if region_id:
+                                    region_names = await self._resolve_names([region_id])
+                                    region_name = region_names.get(region_id, f"Region {region_id}")
+                                    
+                                    # Initialize region stats if not exists (without lock to avoid deadlock)
+                                    # The actual count increment happens in _process_kill which already has the lock
+                                    if region_id not in self.region_stats:
+                                        self.region_stats[region_id] = {
+                                            "name": region_name,
+                                            "count": 0
+                                        }
+                    
+                    result = {
+                        "name": system_name,
+                        "region_id": region_id,
+                        "region_name": region_name
+                    }
+                    
+                    # Cache the result
+                    self.system_cache[system_id] = result
+                    return result
+                else:
+                    return {"name": f"System {system_id}", "region_id": None, "region_name": None}
+        except Exception as e:
+            print(f"Error fetching system info: {e}")
+            return {"name": f"System {system_id}", "region_id": None, "region_name": None}
     
     async def _process_kill(self, kill_id: int, killmail: Dict, package: Dict):
         """Process a killmail and add it to recent kills"""
@@ -149,26 +265,84 @@ class ZKillboardRedisQ:
                         final_blow_attacker = attacker
                         break
                 
-                # Get zkb metadata
+                # Get zkb metadata early for PvE filtering
                 zkb = package.get('zkb', {})
+                
+                # Filter out PvE kills - skip if no player attacker (character_id)
+                # NPCs don't have character_id, so this filters out PvE kills
+                # Also check zkb.npc flag as additional validation
+                if not final_blow_attacker or not final_blow_attacker.get('character_id') or zkb.get('npc', False):
+                    print(f"Skipping PvE kill {kill_id} - no player attacker or NPC kill")
+                    return
+                
+                # Collect all IDs that need name resolution
+                ids_to_resolve = []
+                if victim.get('character_id'):
+                    ids_to_resolve.append(victim['character_id'])
+                if victim.get('corporation_id'):
+                    ids_to_resolve.append(victim['corporation_id'])
+                if victim.get('alliance_id'):
+                    ids_to_resolve.append(victim['alliance_id'])
+                if final_blow_attacker:
+                    if final_blow_attacker.get('character_id'):
+                        ids_to_resolve.append(final_blow_attacker['character_id'])
+                    if final_blow_attacker.get('corporation_id'):
+                        ids_to_resolve.append(final_blow_attacker['corporation_id'])
+                    if final_blow_attacker.get('alliance_id'):
+                        ids_to_resolve.append(final_blow_attacker['alliance_id'])
+                
+                # Resolve names
+                names = await self._resolve_names(ids_to_resolve) if ids_to_resolve else {}
+                
+                # Get ship information
+                victim_ship_info = {}
+                attacker_ship_info = {}
+                
+                if victim.get('ship_type_id'):
+                    victim_ship_info = await self._get_ship_info(victim['ship_type_id'])
+                
+                if final_blow_attacker and final_blow_attacker.get('ship_type_id'):
+                    attacker_ship_info = await self._get_ship_info(final_blow_attacker['ship_type_id'])
+                
+                # Get system information
+                system_info = await self._get_system_info(solar_system_id)
+                
+                # Update region stats (only for PvP kills that passed the filter)
+                if system_info.get('region_id'):
+                    region_id = system_info['region_id']
+                    if region_id in self.region_stats:
+                        self.region_stats[region_id]['count'] += 1
                 
                 # Format kill information
                 formatted_kill = {
                     "killmail_id": kill_id,
                     "killmail_time": killmail.get('killmail_time', datetime.utcnow().isoformat()),
                     "solar_system_id": solar_system_id,
+                    "solar_system_name": system_info.get('name'),
+                    "region_id": system_info.get('region_id'),
+                    "region_name": system_info.get('region_name'),
                     "victim": {
                         "character_id": victim.get('character_id'),
+                        "character_name": names.get(victim.get('character_id'), None) if victim.get('character_id') else None,
                         "corporation_id": victim.get('corporation_id'),
+                        "corporation_name": names.get(victim.get('corporation_id'), None) if victim.get('corporation_id') else None,
                         "alliance_id": victim.get('alliance_id'),
+                        "alliance_name": names.get(victim.get('alliance_id'), None) if victim.get('alliance_id') else None,
                         "ship_type_id": victim.get('ship_type_id'),
+                        "ship_name": victim_ship_info.get('name'),
+                        "ship_icon": victim_ship_info.get('icon_url'),
                         "damage_taken": victim.get('damage_taken', 0)
                     },
                     "attacker": {
                         "character_id": final_blow_attacker.get('character_id') if final_blow_attacker else None,
+                        "character_name": names.get(final_blow_attacker.get('character_id'), None) if final_blow_attacker and final_blow_attacker.get('character_id') else None,
                         "corporation_id": final_blow_attacker.get('corporation_id') if final_blow_attacker else None,
+                        "corporation_name": names.get(final_blow_attacker.get('corporation_id'), None) if final_blow_attacker and final_blow_attacker.get('corporation_id') else None,
                         "alliance_id": final_blow_attacker.get('alliance_id') if final_blow_attacker else None,
+                        "alliance_name": names.get(final_blow_attacker.get('alliance_id'), None) if final_blow_attacker and final_blow_attacker.get('alliance_id') else None,
                         "ship_type_id": final_blow_attacker.get('ship_type_id') if final_blow_attacker else None,
+                        "ship_name": attacker_ship_info.get('name') if attacker_ship_info else None,
+                        "ship_icon": attacker_ship_info.get('icon_url') if attacker_ship_info else None,
                         "damage_done": final_blow_attacker.get('damage_done', 0) if final_blow_attacker else 0
                     },
                     "zkb": {
@@ -197,9 +371,43 @@ class ZKillboardRedisQ:
         """Get the list of recent kills (thread-safe)"""
         return self.recent_kills.copy()
     
+    def get_region_stats(self) -> List[Dict]:
+        """Get region statistics sorted by activity (most active first)"""
+        # Note: This is called from FastAPI which runs in the same event loop
+        # We don't need async lock here since we're just reading
+        stats = [
+            {
+                "region_id": region_id,
+                "name": data["name"],
+                "count": data["count"]
+            }
+            for region_id, data in self.region_stats.items()
+        ]
+        # Sort by count descending
+        stats.sort(key=lambda x: x["count"], reverse=True)
+        return stats
+    
     def is_connected(self) -> bool:
         """Check if RedisQ is connected"""
         return self.connected
+    
+    def is_paused(self) -> bool:
+        """Check if parsing is paused"""
+        return self._paused
+    
+    def pause(self):
+        """Pause parsing of killmails"""
+        if not self._paused:
+            self._paused = True
+            self._pause_event.clear()
+            print("Parsing paused")
+    
+    def resume(self):
+        """Resume parsing of killmails"""
+        if self._paused:
+            self._paused = False
+            self._pause_event.set()
+            print("Parsing resumed")
     
     async def disconnect(self):
         """Disconnect from RedisQ"""

@@ -128,6 +128,13 @@ Solo-hunter/
 
 The application uses hot-reload for both frontend and backend during development when using Docker Compose with volume mounts.
 
+### Hot Reload
+
+- **Backend**: Automatically reloads when Python files change (using uvicorn `--reload`)
+- **Frontend**: Automatically reloads when Svelte/JS files change (Vite HMR)
+
+**Note**: On Windows, file watching may have slight delays. If hot reload doesn't work immediately, wait a few seconds or restart the container.
+
 ### Stopping the Services
 
 ```bash

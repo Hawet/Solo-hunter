@@ -1,12 +1,15 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import KillList from './components/KillList.svelte';
+  import RegionStats from './components/RegionStats.svelte';
 
   let kills = [];
+  let regions = [];
   let loading = true;
   let error = null;
   let pollInterval;
   let connectionStatus = 'disconnected';
+  let isPaused = false;
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -21,11 +24,19 @@
       loading = false;
       error = null;
       
+      // Fetch region stats
+      const regionsResponse = await fetch(`${API_URL}/api/regions`);
+      if (regionsResponse.ok) {
+        const regionsData = await regionsResponse.json();
+        regions = regionsData.regions || [];
+      }
+      
       // Check connection status
       const healthResponse = await fetch(`${API_URL}/api/health`);
       if (healthResponse.ok) {
         const healthData = await healthResponse.json();
         connectionStatus = healthData.redisq_connected ? 'connected' : 'disconnected';
+        isPaused = healthData.paused || false;
       }
     } catch (err) {
       console.error('Error fetching kills:', err);
@@ -46,18 +57,51 @@
       clearInterval(pollInterval);
     }
   });
+
+  async function toggleParsing() {
+    try {
+      const endpoint = isPaused ? '/api/resume' : '/api/pause';
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        isPaused = !isPaused;
+        console.log(data.message);
+      } else {
+        console.error('Failed to toggle parsing');
+      }
+    } catch (err) {
+      console.error('Error toggling parsing:', err);
+    }
+  }
 </script>
 
 <main>
   <header>
     <h1>🛸 Solo Hunter</h1>
     <p class="subtitle">EVE Online PvP Activity Monitor</p>
-    <div class="status-indicator">
-      <span class="status-dot" class:connected={connectionStatus === 'connected'} class:disconnected={connectionStatus !== 'connected'}></span>
-      <span class="status-text">
-        {connectionStatus === 'connected' ? 'Connected to RedisQ' : 
-         connectionStatus === 'disconnected' ? 'Connecting...' : 'Connection error'}
-      </span>
+    <div class="status-controls">
+      <div class="status-indicator">
+        <span class="status-dot" class:connected={connectionStatus === 'connected'} class:disconnected={connectionStatus !== 'connected'}></span>
+        <span class="status-text">
+          {connectionStatus === 'connected' ? 'Connected to RedisQ' : 
+           connectionStatus === 'disconnected' ? 'Connecting...' : 'Connection error'}
+        </span>
+      </div>
+      <button 
+        class="toggle-btn" 
+        class:paused={isPaused}
+        on:click={toggleParsing}
+        disabled={connectionStatus !== 'connected'}
+        title={isPaused ? 'Resume parsing' : 'Pause parsing'}
+      >
+        {isPaused ? '▶ Resume' : '⏸ Pause'}
+      </button>
     </div>
   </header>
 
@@ -67,6 +111,9 @@
     {:else if error}
       <div class="error">Error: {error}</div>
     {:else}
+      {#if regions.length > 0}
+        <RegionStats {regions} />
+      {/if}
       <KillList {kills} />
     {/if}
   </div>
@@ -108,12 +155,20 @@
     margin-top: 0.5rem;
   }
 
+  .status-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+
   .status-indicator {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    margin-top: 1rem;
     font-size: 0.9rem;
   }
 
@@ -142,6 +197,37 @@
 
   .status-text {
     color: #a0a0a0;
+  }
+
+  .toggle-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    padding: 0.6rem 1.2rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .toggle-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(102, 126, 234, 0.3);
+  }
+
+  .toggle-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .toggle-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .toggle-btn.paused {
+    background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
   }
 
   .container {
