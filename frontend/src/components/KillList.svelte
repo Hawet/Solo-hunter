@@ -207,7 +207,22 @@
 
             <!-- VS Divider -->
             <div class="vs-divider">
-              <span class="vs-text">VS</span>
+              <svg class="swords-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <!-- First sword (diagonal from top-left to bottom-right) -->
+                <path d="M6 3 L18 15 M6 3 L4 5 M6 3 L8 5 M18 15 L16 17 M18 15 L20 17" 
+                      stroke="currentColor" 
+                      stroke-width="2.5" 
+                      stroke-linecap="round" 
+                      stroke-linejoin="round"/>
+                <!-- Second sword (diagonal from top-right to bottom-left) -->
+                <path d="M18 3 L6 15 M18 3 L20 5 M18 3 L16 5 M6 15 L8 17 M6 15 L4 17" 
+                      stroke="currentColor" 
+                      stroke-width="2.5" 
+                      stroke-linecap="round" 
+                      stroke-linejoin="round"/>
+                <!-- Cross point/guard -->
+                <circle cx="12" cy="9" r="2" fill="currentColor" opacity="0.9"/>
+              </svg>
             </div>
 
             <!-- Attacker -->
@@ -539,18 +554,30 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    padding: 0.25rem;
   }
 
-  .vs-text {
-    font-size: 0.6rem;
-    font-weight: 800;
-    color: #fca5a5;
-    background: rgba(239, 68, 68, 0.15);
-    padding: 0.25rem 0.5rem;
-    border-radius: 6px;
-    letter-spacing: 0.08em;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+  .swords-icon {
+    width: 32px;
+    height: 32px;
+    color: #ef4444;
+    filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.8)) 
+            drop-shadow(0 0 12px rgba(239, 68, 68, 0.6))
+            drop-shadow(0 0 16px rgba(239, 68, 68, 0.4));
+    animation: swordsGlow 2s ease-in-out infinite alternate;
+  }
+
+  @keyframes swordsGlow {
+    0% {
+      filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.6)) 
+              drop-shadow(0 0 10px rgba(239, 68, 68, 0.4))
+              drop-shadow(0 0 14px rgba(239, 68, 68, 0.3));
+    }
+    100% {
+      filter: drop-shadow(0 0 10px rgba(239, 68, 68, 1)) 
+              drop-shadow(0 0 16px rgba(239, 68, 68, 0.8))
+              drop-shadow(0 0 20px rgba(239, 68, 68, 0.6));
+    }
   }
 
   .location-footer {
