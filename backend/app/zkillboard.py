@@ -2,8 +2,10 @@ import asyncio
 import json
 import aiohttp
 import uuid
+import os
 from typing import List, Dict, Optional
 from datetime import datetime
+from pathlib import Path
 
 class ZKillboardRedisQ:
     """
@@ -37,6 +39,55 @@ class ZKillboardRedisQ:
         self.region_stats: Dict[int, Dict] = {}  # region_id -> {name, count}
         self.system_cache: Dict[int, Dict] = {}  # system_id -> {name, region_id, region_name}
         
+        # Local cache files for static data
+        self.cache_dir = Path(__file__).parent.parent / "cache"
+        self.cache_dir.mkdir(exist_ok=True)
+        self.items_cache_file = self.cache_dir / "items.json"
+        self.ships_cache_file = self.cache_dir / "ships.json"
+        
+        # In-memory caches (loaded from files)
+        self.items_cache: Dict[int, str] = {}  # type_id -> name
+        self.ships_cache: Dict[int, str] = {}  # type_id -> name
+        
+        # Load existing caches
+        self._load_cache()
+        
+    def _load_cache(self):
+        """Load cached items and ships from JSON files"""
+        try:
+            if self.items_cache_file.exists():
+                with open(self.items_cache_file, 'r', encoding='utf-8') as f:
+                    self.items_cache = json.load(f)
+                print(f"Loaded {len(self.items_cache)} items from cache")
+        except Exception as e:
+            print(f"Error loading items cache: {e}")
+            self.items_cache = {}
+        
+        try:
+            if self.ships_cache_file.exists():
+                with open(self.ships_cache_file, 'r', encoding='utf-8') as f:
+                    self.ships_cache = json.load(f)
+                print(f"Loaded {len(self.ships_cache)} ships from cache")
+        except Exception as e:
+            print(f"Error loading ships cache: {e}")
+            self.ships_cache = {}
+    
+    def _save_items_cache(self):
+        """Save items cache to JSON file"""
+        try:
+            with open(self.items_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.items_cache, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving items cache: {e}")
+    
+    def _save_ships_cache(self):
+        """Save ships cache to JSON file"""
+        try:
+            with open(self.ships_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.ships_cache, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving ships cache: {e}")
+    
     async def connect(self):
         """Start polling RedisQ for killmails"""
         self._running = True
@@ -166,7 +217,14 @@ class ZKillboardRedisQ:
             return {}
     
     async def _get_ship_info(self, ship_type_id: int) -> Dict:
-        """Get ship type information including name"""
+        """Get ship type information including name (with caching)"""
+        # Check cache first
+        if ship_type_id in self.ships_cache:
+            return {
+                "name": self.ships_cache[ship_type_id],
+                "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
+            }
+        
         if not self.session:
             return {"name": f"Ship {ship_type_id}", "icon_url": None}
         
@@ -175,8 +233,14 @@ class ZKillboardRedisQ:
             async with self.session.get(url) as response:
                 if response.status == 200:
                     type_data = await response.json()
+                    ship_name = type_data.get('name', f"Ship {ship_type_id}")
+                    
+                    # Cache the result
+                    self.ships_cache[ship_type_id] = ship_name
+                    self._save_ships_cache()
+                    
                     return {
-                        "name": type_data.get('name', f"Ship {ship_type_id}"),
+                        "name": ship_name,
                         "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
                     }
                 else:
@@ -191,6 +255,34 @@ class ZKillboardRedisQ:
                 "name": f"Ship {ship_type_id}",
                 "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
             }
+    
+    async def _get_item_name(self, item_type_id: int) -> str:
+        """Get item name (with caching)"""
+        # Check cache first
+        if item_type_id in self.items_cache:
+            return self.items_cache[item_type_id]
+        
+        if not self.session:
+            return f"Item {item_type_id}"
+        
+        try:
+            # Use ESI names endpoint for bulk resolution (more efficient)
+            url = f"{self.esi_base_url}/v2/universe/names/"
+            async with self.session.post(url, json=[item_type_id]) as response:
+                if response.status == 200:
+                    names_data = await response.json()
+                    if names_data and len(names_data) > 0:
+                        item_name = names_data[0].get('name', f"Item {item_type_id}")
+                        
+                        # Cache the result
+                        self.items_cache[item_type_id] = item_name
+                        self._save_items_cache()
+                        
+                        return item_name
+        except Exception as e:
+            print(f"Error fetching item name: {e}")
+        
+        return f"Item {item_type_id}"
     
     async def _get_system_info(self, system_id: int) -> Dict:
         """Get system information including name and region"""
@@ -313,6 +405,45 @@ class ZKillboardRedisQ:
                     if region_id in self.region_stats:
                         self.region_stats[region_id]['count'] += 1
                 
+                # Process victim fit (items)
+                victim_items = victim.get('items', [])
+                fit_items = []
+                if victim_items:
+                    # Organize items by slot (high: 27-34, mid: 19-26, low: 11-18, rig: 92-97, cargo: 5)
+                    for item in victim_items:
+                        item_type_id = item.get('item_type_id')
+                        flag = item.get('flag', 0)
+                        
+                        if not item_type_id:
+                            continue
+                        
+                        # Get item name (uses cache)
+                        item_name = await self._get_item_name(item_type_id)
+                        
+                        # Categorize by slot
+                        slot_type = None
+                        if 27 <= flag <= 34:  # High slots
+                            slot_type = "high"
+                        elif 19 <= flag <= 26:  # Mid slots
+                            slot_type = "mid"
+                        elif 11 <= flag <= 18:  # Low slots
+                            slot_type = "low"
+                        elif 92 <= flag <= 97:  # Rigs
+                            slot_type = "rig"
+                        elif flag == 5:  # Cargo
+                            slot_type = "cargo"
+                        
+                        if slot_type:
+                            fit_items.append({
+                                "name": item_name,
+                                "type_id": item_type_id,
+                                "icon_url": f"{self.image_cdn}/types/{item_type_id}/icon",
+                                "flag": flag,
+                                "slot": slot_type,
+                                "quantity_destroyed": item.get('quantity_destroyed', 0),
+                                "quantity_dropped": item.get('quantity_dropped', 0)
+                            })
+                
                 # Format kill information
                 formatted_kill = {
                     "killmail_id": kill_id,
@@ -331,7 +462,8 @@ class ZKillboardRedisQ:
                         "ship_type_id": victim.get('ship_type_id'),
                         "ship_name": victim_ship_info.get('name'),
                         "ship_icon": victim_ship_info.get('icon_url'),
-                        "damage_taken": victim.get('damage_taken', 0)
+                        "damage_taken": victim.get('damage_taken', 0),
+                        "fit": fit_items
                     },
                     "attacker": {
                         "character_id": final_blow_attacker.get('character_id') if final_blow_attacker else None,
