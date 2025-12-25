@@ -13,6 +13,14 @@
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+  // Generate static star positions once
+  const staticStars = Array.from({ length: 50 }, () => ({
+    size: ['small', 'medium', 'large'][Math.floor(Math.random() * 3)],
+    left: Math.random() * 100,
+    top: Math.random() * 100,
+    delay: Math.random() * 3
+  }));
+
   async function fetchKills() {
     try {
       const response = await fetch(`${API_URL}/api/kills`);
@@ -80,6 +88,16 @@
     }
   }
 </script>
+
+<!-- Static glowing stars background -->
+<div class="static-stars">
+  {#each staticStars as star}
+    <div 
+      class="static-star {star.size}" 
+      style="left: {star.left}%; top: {star.top}%; animation-delay: {star.delay}s;"
+    ></div>
+  {/each}
+</div>
 
 <main>
   <header>
@@ -187,6 +205,66 @@
     z-index: 0;
     pointer-events: none;
     opacity: 0.4;
+  }
+
+  /* Static glowing stars */
+  .static-stars {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .static-star {
+    position: absolute;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 
+      0 0 4px rgba(255, 255, 255, 0.8),
+      0 0 8px rgba(255, 255, 255, 0.6),
+      0 0 12px rgba(239, 68, 68, 0.4),
+      0 0 16px rgba(239, 68, 68, 0.3);
+    animation: starGlow 3s ease-in-out infinite alternate;
+  }
+
+  .static-star.small {
+    width: 2px;
+    height: 2px;
+  }
+
+  .static-star.medium {
+    width: 3px;
+    height: 3px;
+    box-shadow: 
+      0 0 6px rgba(255, 255, 255, 0.9),
+      0 0 12px rgba(255, 255, 255, 0.7),
+      0 0 18px rgba(239, 68, 68, 0.5),
+      0 0 24px rgba(239, 68, 68, 0.4);
+  }
+
+  .static-star.large {
+    width: 4px;
+    height: 4px;
+    box-shadow: 
+      0 0 8px rgba(255, 255, 255, 1),
+      0 0 16px rgba(255, 255, 255, 0.8),
+      0 0 24px rgba(239, 68, 68, 0.6),
+      0 0 32px rgba(239, 68, 68, 0.5);
+  }
+
+  @keyframes starGlow {
+    0% {
+      opacity: 0.6;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1.2);
+    }
   }
 
   @keyframes starfield {
