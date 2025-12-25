@@ -688,7 +688,9 @@
     color: #fca5a5;
     text-decoration: none;
     transition: all 0.2s ease;
-    display: inline-block;
+    display: inline;
+    width: fit-content;
+    max-width: 100%;
   }
 
   .pilot-link:hover {
@@ -1020,9 +1022,10 @@
     font-size: 0.8rem;
     font-weight: 600;
     transition: all 0.2s ease;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: inline;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
   }
 
   .attacker-name-link:hover {
