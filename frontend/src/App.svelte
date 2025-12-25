@@ -124,7 +124,7 @@
       <div class="status-indicator">
         <span class="status-dot" class:connected={connectionStatus === 'connected'} class:disconnected={connectionStatus !== 'connected'}></span>
         <span class="status-text">
-          {connectionStatus === 'connected' ? 'Connected to RedisQ' : 
+          {connectionStatus === 'connected' ? 'Connected' : 
            connectionStatus === 'disconnected' ? 'Connecting...' : 'Connection error'}
         </span>
       </div>
