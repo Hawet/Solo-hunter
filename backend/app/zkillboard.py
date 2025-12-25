@@ -203,17 +203,45 @@ class ZKillboardRedisQ:
         if not ids or not self.session:
             return {}
         
+        # Remove duplicates and None values
+        unique_ids = list(set([id for id in ids if id is not None]))
+        if not unique_ids:
+            return {}
+        
         try:
             url = f"{self.esi_base_url}/v2/universe/names/"
-            async with self.session.post(url, json=ids) as response:
+            async with self.session.post(url, json=unique_ids) as response:
                 if response.status == 200:
                     names_data = await response.json()
-                    return {item['id']: item['name'] for item in names_data}
+                    result = {item['id']: item['name'] for item in names_data}
+                    
+                    # Log if some IDs weren't resolved
+                    resolved_ids = set(result.keys())
+                    requested_ids = set(unique_ids)
+                    missing_ids = requested_ids - resolved_ids
+                    if missing_ids:
+                        print(f"Warning: Could not resolve names for IDs: {missing_ids}")
+                    
+                    return result
+                elif response.status == 429:
+                    # Rate limited - wait a bit and retry once
+                    print(f"Rate limited by ESI, waiting 2 seconds...")
+                    await asyncio.sleep(2)
+                    async with self.session.post(url, json=unique_ids) as retry_response:
+                        if retry_response.status == 200:
+                            names_data = await retry_response.json()
+                            return {item['id']: item['name'] for item in names_data}
+                        else:
+                            print(f"Failed to resolve names after retry: {retry_response.status}")
+                            return {}
                 else:
-                    print(f"Failed to resolve names: {response.status}")
+                    error_text = await response.text()
+                    print(f"Failed to resolve names: {response.status} - {error_text[:200]}")
                     return {}
         except Exception as e:
             print(f"Error resolving names: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
     
     async def _get_ship_info(self, ship_type_id: int) -> Dict:
@@ -367,6 +395,9 @@ class ZKillboardRedisQ:
                     print(f"Skipping PvE kill {kill_id} - no player attacker or NPC kill")
                     return
                 
+                # Filter to only player attackers (those with character_id)
+                player_attackers = [a for a in attackers if a.get('character_id')]
+                
                 # Collect all IDs that need name resolution
                 ids_to_resolve = []
                 if victim.get('character_id'):
@@ -375,16 +406,27 @@ class ZKillboardRedisQ:
                     ids_to_resolve.append(victim['corporation_id'])
                 if victim.get('alliance_id'):
                     ids_to_resolve.append(victim['alliance_id'])
-                if final_blow_attacker:
-                    if final_blow_attacker.get('character_id'):
-                        ids_to_resolve.append(final_blow_attacker['character_id'])
-                    if final_blow_attacker.get('corporation_id'):
-                        ids_to_resolve.append(final_blow_attacker['corporation_id'])
-                    if final_blow_attacker.get('alliance_id'):
-                        ids_to_resolve.append(final_blow_attacker['alliance_id'])
+                
+                # Collect IDs from all player attackers
+                for attacker in player_attackers:
+                    if attacker.get('character_id'):
+                        ids_to_resolve.append(attacker['character_id'])
+                    if attacker.get('corporation_id'):
+                        ids_to_resolve.append(attacker['corporation_id'])
+                    if attacker.get('alliance_id'):
+                        ids_to_resolve.append(attacker['alliance_id'])
                 
                 # Resolve names
                 names = await self._resolve_names(ids_to_resolve) if ids_to_resolve else {}
+                
+                # Debug: Log if any character names are missing
+                missing_character_names = []
+                for attacker in player_attackers:
+                    char_id = attacker.get('character_id')
+                    if char_id and char_id not in names:
+                        missing_character_names.append(char_id)
+                if missing_character_names:
+                    print(f"Warning: Missing character names for IDs: {missing_character_names} in kill {kill_id}")
                 
                 # Get ship information
                 victim_ship_info = {}
@@ -395,6 +437,30 @@ class ZKillboardRedisQ:
                 
                 if final_blow_attacker and final_blow_attacker.get('ship_type_id'):
                     attacker_ship_info = await self._get_ship_info(final_blow_attacker['ship_type_id'])
+                
+                # Process all attackers
+                all_attackers_data = []
+                for attacker in player_attackers:
+                    attacker_ship_info_full = {}
+                    if attacker.get('ship_type_id'):
+                        attacker_ship_info_full = await self._get_ship_info(attacker['ship_type_id'])
+                    
+                    all_attackers_data.append({
+                        "character_id": attacker.get('character_id'),
+                        "character_name": names.get(attacker.get('character_id'), None) if attacker.get('character_id') else None,
+                        "corporation_id": attacker.get('corporation_id'),
+                        "corporation_name": names.get(attacker.get('corporation_id'), None) if attacker.get('corporation_id') else None,
+                        "alliance_id": attacker.get('alliance_id'),
+                        "alliance_name": names.get(attacker.get('alliance_id'), None) if attacker.get('alliance_id') else None,
+                        "ship_type_id": attacker.get('ship_type_id'),
+                        "ship_name": attacker_ship_info_full.get('name') if attacker_ship_info_full else None,
+                        "ship_icon": attacker_ship_info_full.get('icon_url') if attacker_ship_info_full else None,
+                        "damage_done": attacker.get('damage_done', 0),
+                        "final_blow": attacker.get('final_blow', False)
+                    })
+                
+                # Sort attackers by damage done (descending)
+                all_attackers_data.sort(key=lambda x: x.get('damage_done', 0), reverse=True)
                 
                 # Get system information
                 system_info = await self._get_system_info(solar_system_id)
@@ -484,7 +550,8 @@ class ZKillboardRedisQ:
                         "solo": zkb.get('solo', False),
                         "labels": zkb.get('labels', [])
                     },
-                    "zkill_url": f"https://zkillboard.com/kill/{kill_id}/"
+                    "zkill_url": f"https://zkillboard.com/kill/{kill_id}/",
+                    "all_attackers": all_attackers_data
                 }
                 
                 # Add to beginning of list

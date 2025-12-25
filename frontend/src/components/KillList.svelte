@@ -3,6 +3,17 @@
   
   export let kills = [];
 
+  let expandedKills = new Set();
+
+  function toggleKill(killId) {
+    if (expandedKills.has(killId)) {
+      expandedKills.delete(killId);
+    } else {
+      expandedKills.add(killId);
+    }
+    expandedKills = expandedKills; // Trigger reactivity
+  }
+
   let tooltipElement = null;
   let tooltip = {
     visible: false,
@@ -118,7 +129,14 @@
   {:else}
     <div class="kills">
       {#each kills as kill (kill.killmail_id)}
-        <article class="kill-card">
+        <div 
+          class="kill-card" 
+          class:expanded={expandedKills.has(kill.killmail_id)}
+          on:click={() => toggleKill(kill.killmail_id)}
+          role="button"
+          tabindex="0"
+          on:keydown={(e) => e.key === 'Enter' && toggleKill(kill.killmail_id)}
+        >
           <!-- Header with timestamp and link -->
           <div class="card-header">
             <time class="timestamp">{formatTime(kill.killmail_time)}</time>
@@ -172,13 +190,19 @@
                         rel="noopener noreferrer"
                         class="pilot-name pilot-link"
                       >
-                        {kill.victim.character_name || `Character ${kill.victim.character_id}`}
+                        {kill.victim.character_name || 'Unknown Character'}
                       </a>
                     {:else}
                       <div class="pilot-name">{kill.victim.character_name || 'Unknown'}</div>
                     {/if}
                     {#if kill.victim.corporation_name}
-                      <div class="corp-name">{kill.victim.corporation_name}</div>
+                      <div class="corp-name">
+                        {kill.victim.corporation_name}
+                        {#if kill.victim.alliance_name}
+                          <span class="alliance-separator">•</span>
+                          <span class="alliance-name">{kill.victim.alliance_name}</span>
+                        {/if}
+                      </div>
                     {/if}
                   </div>
                 </div>
@@ -195,6 +219,8 @@
                               {#each slotItems as item}
                                 <div 
                                   class="item-icon-wrapper"
+                                  role="img"
+                                  aria-label={item.name}
                                   on:mouseenter={(e) => showTooltip(e, item.name)}
                                   on:mousemove={(e) => updateTooltipPosition(e)}
                                   on:mouseleave={hideTooltip}
@@ -269,13 +295,19 @@
                         rel="noopener noreferrer"
                         class="pilot-name pilot-link"
                       >
-                        {kill.attacker.character_name || `Character ${kill.attacker.character_id}`}
+                        {kill.attacker.character_name || 'Unknown Character'}
                       </a>
                     {:else}
                       <div class="pilot-name">{kill.attacker.character_name || 'Unknown'}</div>
                     {/if}
                     {#if kill.attacker.corporation_name}
-                      <div class="corp-name">{kill.attacker.corporation_name}</div>
+                      <div class="corp-name">
+                        {kill.attacker.corporation_name}
+                        {#if kill.attacker.alliance_name}
+                          <span class="alliance-separator">•</span>
+                          <span class="alliance-name">{kill.attacker.alliance_name}</span>
+                        {/if}
+                      </div>
                     {/if}
                   </div>
                 </div>
@@ -297,7 +329,81 @@
               {/if}
             </span>
           </div>
-        </article>
+
+          <!-- Expanded view: All attackers -->
+          {#if expandedKills.has(kill.killmail_id) && kill.all_attackers && kill.all_attackers.length > 0}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div class="expanded-content" on:click|stopPropagation role="region" aria-label="All attackers">
+              <div class="expanded-header">
+                <h3>All Attackers ({kill.all_attackers.length})</h3>
+                <span class="expand-indicator">▼</span>
+              </div>
+              <div class="attackers-list">
+                {#each kill.all_attackers as attacker, index}
+                  <div class="attacker-entry" class:final-blow={attacker.final_blow}>
+                    <div class="attacker-rank">#{index + 1}</div>
+                    <div class="attacker-main">
+                      <div class="attacker-header-row">
+                        {#if attacker.ship_icon}
+                          <img 
+                            src={attacker.ship_icon} 
+                            alt={attacker.ship_name || 'Ship'}
+                            class="attacker-ship-icon"
+                            on:error={(e) => e.target.style.display = 'none'}
+                          />
+                        {/if}
+                        <div class="attacker-info">
+                          {#if attacker.character_id}
+                            <a 
+                              href={`https://zkillboard.com/character/${attacker.character_id}/`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              class="attacker-name-link"
+                              on:click|stopPropagation
+                            >
+                              {attacker.character_name || 'Unknown Character'}
+                            </a>
+                          {:else}
+                            <span class="attacker-name">{attacker.character_name || 'Unknown'}</span>
+                          {/if}
+                          {#if attacker.final_blow}
+                            <span class="final-blow-badge">Final Blow</span>
+                          {/if}
+                        </div>
+                        <div class="attacker-damage">
+                          {formatNumber(attacker.damage_done)} dmg
+                        </div>
+                      </div>
+                      <div class="attacker-details">
+                        <div class="attacker-ship">{attacker.ship_name || `Ship ${attacker.ship_type_id || 'Unknown'}`}</div>
+                        <div class="attacker-corp-alliance">
+                          {#if attacker.corporation_name}
+                            <span class="attacker-corp">{attacker.corporation_name}</span>
+                            {#if attacker.alliance_name}
+                              <span class="alliance-separator">•</span>
+                              <span class="attacker-alliance">{attacker.alliance_name}</span>
+                            {/if}
+                          {/if}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {:else if expandedKills.has(kill.killmail_id)}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div class="expanded-content" on:click|stopPropagation role="region" aria-label="All attackers">
+              <div class="expanded-header">
+                <h3>All Attackers</h3>
+                <span class="expand-indicator">▼</span>
+              </div>
+              <div class="no-attackers">No additional attacker data available</div>
+            </div>
+          {/if}
+        </div>
       {/each}
     </div>
   {/if}
@@ -371,6 +477,11 @@
     position: relative;
     overflow: hidden;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+  }
+
+  .kill-card.expanded {
+    border-color: rgba(239, 68, 68, 0.3);
   }
 
   .kill-card::before {
@@ -422,6 +533,8 @@
     text-decoration: none;
     font-size: 0.75rem;
     font-weight: 500;
+    position: relative;
+    z-index: 10;
   }
 
   .external-link:hover {
@@ -591,6 +704,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .alliance-separator {
+    color: #666;
+    margin: 0 0.2rem;
+  }
+
+  .alliance-name {
+    color: #999;
+    font-weight: 500;
   }
 
   .vs-divider {
@@ -774,6 +900,205 @@
     }
   }
 
+  /* Expanded content styles */
+  .expanded-content {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(239, 68, 68, 0.2);
+    animation: expandFadeIn 0.3s ease-out;
+  }
+
+  @keyframes expandFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .expanded-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+
+  .expanded-header h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .expand-indicator {
+    color: #fca5a5;
+    font-size: 0.8rem;
+  }
+
+  .attackers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .attacker-entry {
+    background: rgba(15, 15, 23, 0.5);
+    border: 1px solid rgba(239, 68, 68, 0.1);
+    border-radius: 8px;
+    padding: 0.6rem;
+    display: flex;
+    gap: 0.6rem;
+    transition: all 0.2s ease;
+  }
+
+  .attacker-entry:hover {
+    background: rgba(20, 20, 30, 0.7);
+    border-color: rgba(239, 68, 68, 0.2);
+  }
+
+  .attacker-entry.final-blow {
+    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.05);
+  }
+
+  .attacker-rank {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #fca5a5;
+  }
+
+  .attacker-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .attacker-header-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .attacker-ship-icon {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    object-fit: contain;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .attacker-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .attacker-name-link {
+    color: #fca5a5;
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .attacker-name-link:hover {
+    color: #ef4444;
+    text-decoration: underline;
+    text-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  }
+
+  .attacker-name {
+    color: #e0e0e0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .final-blow-badge {
+    font-size: 0.6rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.3rem;
+    border-radius: 3px;
+    background: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.5);
+  }
+
+  .attacker-damage {
+    font-size: 0.75rem;
+    color: #ffc107;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .attacker-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin-left: 42px; /* Align with ship icon */
+  }
+
+  .attacker-ship {
+    font-size: 0.75rem;
+    color: #a0a0a0;
+    font-weight: 500;
+  }
+
+  .attacker-corp-alliance {
+    font-size: 0.7rem;
+    color: #888;
+    font-style: italic;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .attacker-corp {
+    color: #888;
+  }
+
+  .attacker-alliance {
+    color: #999;
+    font-weight: 500;
+  }
+
+  .no-attackers {
+    text-align: center;
+    padding: 1rem;
+    color: #888;
+    font-style: italic;
+    font-size: 0.85rem;
+  }
+
   /* Responsive design */
   @media (max-width: 768px) {
     .combatants {
@@ -789,6 +1114,10 @@
     .ship-container {
       width: 56px;
       height: 56px;
+    }
+
+    .attacker-details {
+      margin-left: 0;
     }
   }
 </style>
