@@ -127,13 +127,14 @@
               target="_blank" 
               rel="noopener noreferrer"
               class="external-link"
-              title="View on zKillboard"
+              title="View full killmail on zKillboard"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                 <polyline points="15 3 21 3 21 9"></polyline>
                 <line x1="10" y1="14" x2="21" y2="3"></line>
               </svg>
+              <span class="link-text">View on zKillboard</span>
             </a>
           </div>
 
@@ -164,7 +165,18 @@
                   {/if}
                   <div class="combatant-info">
                     <div class="ship-name">{kill.victim.ship_name || `Ship ${kill.victim.ship_type_id || 'Unknown'}`}</div>
-                    <div class="pilot-name">{kill.victim.character_name || `Character ${kill.victim.character_id || 'Unknown'}`}</div>
+                    {#if kill.victim.character_id}
+                      <a 
+                        href={`https://zkillboard.com/character/${kill.victim.character_id}/`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="pilot-name pilot-link"
+                      >
+                        {kill.victim.character_name || `Character ${kill.victim.character_id}`}
+                      </a>
+                    {:else}
+                      <div class="pilot-name">{kill.victim.character_name || 'Unknown'}</div>
+                    {/if}
                     {#if kill.victim.corporation_name}
                       <div class="corp-name">{kill.victim.corporation_name}</div>
                     {/if}
@@ -250,7 +262,18 @@
                   {/if}
                   <div class="combatant-info">
                     <div class="ship-name">{kill.attacker.ship_name || `Ship ${kill.attacker.ship_type_id || 'Unknown'}`}</div>
-                    <div class="pilot-name">{kill.attacker.character_name || `Character ${kill.attacker.character_id || 'Unknown'}`}</div>
+                    {#if kill.attacker.character_id}
+                      <a 
+                        href={`https://zkillboard.com/character/${kill.attacker.character_id}/`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="pilot-name pilot-link"
+                      >
+                        {kill.attacker.character_name || `Character ${kill.attacker.character_id}`}
+                      </a>
+                    {:else}
+                      <div class="pilot-name">{kill.attacker.character_name || 'Unknown'}</div>
+                    {/if}
                     {#if kill.attacker.corporation_name}
                       <div class="corp-name">{kill.attacker.corporation_name}</div>
                     {/if}
@@ -392,15 +415,23 @@
     color: #6b7280;
     display: flex;
     align-items: center;
+    gap: 0.4rem;
     transition: all 0.2s ease;
-    padding: 0.25rem;
+    padding: 0.4rem 0.6rem;
     border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.75rem;
+    font-weight: 500;
   }
 
   .external-link:hover {
     color: #fca5a5;
     background: rgba(239, 68, 68, 0.15);
-    transform: scale(1.1);
+    transform: scale(1.05);
+  }
+
+  .link-text {
+    white-space: nowrap;
   }
 
   .combatants {
@@ -538,6 +569,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .pilot-link {
+    color: #fca5a5;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    display: inline-block;
+  }
+
+  .pilot-link:hover {
+    color: #ef4444;
+    text-decoration: underline;
+    text-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
   }
 
   .corp-name {
