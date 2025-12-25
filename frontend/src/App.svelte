@@ -83,7 +83,24 @@
 
 <main>
   <header>
-    <h1>🛸 Solo Hunter</h1>
+    <div class="logo-container">
+      <svg class="logo" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+        <!-- Crosshair/Target -->
+        <circle cx="60" cy="60" r="45" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+        <circle cx="60" cy="60" r="30" fill="none" stroke="currentColor" stroke-width="2" opacity="0.5"/>
+        <circle cx="60" cy="60" r="15" fill="none" stroke="currentColor" stroke-width="2"/>
+        <!-- Cross lines -->
+        <line x1="60" y1="15" x2="60" y2="45" stroke="currentColor" stroke-width="2"/>
+        <line x1="60" y1="75" x2="60" y2="105" stroke="currentColor" stroke-width="2"/>
+        <line x1="15" y1="60" x2="45" y2="60" stroke="currentColor" stroke-width="2"/>
+        <line x1="75" y1="60" x2="105" y2="60" stroke="currentColor" stroke-width="2"/>
+        <!-- Center dot -->
+        <circle cx="60" cy="60" r="3" fill="currentColor"/>
+        <!-- Arrow/Indicator -->
+        <path d="M 60 15 L 50 25 L 55 25 L 55 35 L 65 35 L 65 25 L 70 25 Z" fill="currentColor" opacity="0.8"/>
+      </svg>
+      <h1>Solo Hunter</h1>
+    </div>
     <p class="subtitle">EVE Online PvP Activity Monitor</p>
     <div class="status-controls">
       <div class="status-indicator">
@@ -124,15 +141,65 @@
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
       Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-    background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
+    background: #0a0a0f;
     color: #e0e0e0;
     min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  :global(body::before) {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: 
+      radial-gradient(ellipse at 20% 50%, rgba(239, 68, 68, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, rgba(220, 38, 38, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 40% 20%, rgba(239, 68, 68, 0.05) 0%, transparent 50%);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  :global(body::after) {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: 
+      radial-gradient(2px 2px at 20% 30%, #fff, transparent),
+      radial-gradient(2px 2px at 60% 70%, rgba(255, 255, 255, 0.8), transparent),
+      radial-gradient(1px 1px at 50% 50%, rgba(255, 255, 255, 0.6), transparent),
+      radial-gradient(1px 1px at 80% 10%, rgba(255, 255, 255, 0.7), transparent),
+      radial-gradient(2px 2px at 90% 40%, rgba(255, 255, 255, 0.9), transparent),
+      radial-gradient(1px 1px at 33% 60%, rgba(255, 255, 255, 0.5), transparent),
+      radial-gradient(1px 1px at 15% 80%, rgba(255, 255, 255, 0.6), transparent),
+      radial-gradient(2px 2px at 70% 20%, rgba(255, 255, 255, 0.8), transparent),
+      radial-gradient(1px 1px at 25% 50%, rgba(255, 255, 255, 0.5), transparent),
+      radial-gradient(1px 1px at 85% 60%, rgba(255, 255, 255, 0.6), transparent);
+    background-repeat: repeat;
+    background-size: 200% 200%;
+    animation: starfield 200s linear infinite;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.4;
+  }
+
+  @keyframes starfield {
+    from { transform: translate(0, 0); }
+    to { transform: translate(-50%, -50%); }
   }
 
   main {
     max-width: 1200px;
     margin: 0 auto;
     padding: 2rem;
+    position: relative;
+    z-index: 1;
   }
 
   header {
@@ -140,19 +207,50 @@
     margin-bottom: 2rem;
   }
 
+  .logo-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .logo {
+    width: 60px;
+    height: 60px;
+    color: #ef4444;
+    filter: drop-shadow(0 0 15px rgba(239, 68, 68, 0.5));
+    animation: logoPulse 3s ease-in-out infinite;
+  }
+
+  @keyframes logoPulse {
+    0%, 100% { 
+      filter: drop-shadow(0 0 15px rgba(239, 68, 68, 0.5));
+      transform: scale(1);
+    }
+    50% { 
+      filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.8));
+      transform: scale(1.05);
+    }
+  }
+
   h1 {
     font-size: 3rem;
     margin: 0;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    filter: drop-shadow(0 0 20px rgba(239, 68, 68, 0.3));
+    letter-spacing: -0.02em;
   }
 
   .subtitle {
-    color: #a0a0a0;
+    color: #9ca3af;
     font-size: 1.2rem;
     margin-top: 0.5rem;
+    font-weight: 300;
+    letter-spacing: 0.02em;
   }
 
   .status-controls {
@@ -196,25 +294,44 @@
   }
 
   .status-text {
-    color: #a0a0a0;
+    color: #9ca3af;
+    font-weight: 500;
   }
 
   .toggle-btn {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border: none;
-    border-radius: 8px;
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 10px;
     color: white;
     padding: 0.6rem 1.2rem;
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .toggle-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s ease;
+  }
+
+  .toggle-btn:hover:not(:disabled)::before {
+    left: 100%;
   }
 
   .toggle-btn:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(102, 126, 234, 0.3);
+    box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    border-color: rgba(239, 68, 68, 0.5);
   }
 
   .toggle-btn:active:not(:disabled) {
@@ -222,20 +339,29 @@
   }
 
   .toggle-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
+    filter: grayscale(0.5);
   }
 
   .toggle-btn.paused {
-    background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    border-color: rgba(16, 185, 129, 0.3);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  .toggle-btn.paused:hover:not(:disabled) {
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    border-color: rgba(16, 185, 129, 0.5);
   }
 
   .container {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
+    background: rgba(15, 15, 23, 0.7);
+    border-radius: 16px;
     padding: 1.5rem;
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
   .loading,

@@ -32,12 +32,13 @@
 
 <style>
   .region-stats {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(20, 20, 30, 0.6);
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.15);
     border-radius: 16px;
     padding: 1.25rem;
     margin-bottom: 1.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 
   .stats-header {
@@ -70,8 +71,8 @@
   }
 
   .region-card {
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(15, 15, 23, 0.5);
+    border: 1px solid rgba(239, 68, 68, 0.1);
     border-radius: 10px;
     padding: 0.75rem;
     transition: all 0.2s ease;
@@ -80,9 +81,10 @@
   }
 
   .region-card:hover {
-    background: rgba(0, 0, 0, 0.3);
-    border-color: rgba(102, 126, 234, 0.3);
+    background: rgba(25, 25, 35, 0.7);
+    border-color: rgba(239, 68, 68, 0.4);
     transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
   }
 
   .region-content {
@@ -111,27 +113,30 @@
   .region-count {
     font-size: 0.85rem;
     font-weight: 700;
-    color: #667eea;
-    background: rgba(102, 126, 234, 0.15);
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.2);
     padding: 0.2rem 0.5rem;
     border-radius: 6px;
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
   }
 
   .activity-bar {
     height: 4px;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.3);
     border-radius: 2px;
     overflow: hidden;
   }
 
   .activity-fill {
     height: 100%;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(90deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%);
     border-radius: 2px;
     transition: width 0.3s ease;
     min-width: 8px;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
   }
 
   @media (max-width: 768px) {

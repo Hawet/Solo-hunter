@@ -204,7 +204,7 @@
     justify-content: space-between;
     margin-bottom: 1.5rem;
     padding-bottom: 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(239, 68, 68, 0.2);
   }
 
   .header h2 {
@@ -213,15 +213,18 @@
     font-weight: 600;
     color: #fff;
     letter-spacing: -0.02em;
+    text-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
   }
 
   .count-badge {
-    background: rgba(102, 126, 234, 0.2);
-    color: #667eea;
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
     padding: 0.25rem 0.75rem;
     border-radius: 12px;
     font-size: 0.85rem;
     font-weight: 600;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
   }
 
   .empty {
@@ -249,14 +252,15 @@
   }
 
   .kill-card {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(20, 20, 30, 0.6);
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
+    border: 1px solid rgba(239, 68, 68, 0.12);
+    border-radius: 12px;
     padding: 0.7rem;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 
   .kill-card::before {
@@ -266,16 +270,16 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.5), transparent);
+    background: linear-gradient(90deg, transparent, rgba(239, 68, 68, 0.6), transparent);
     opacity: 0;
     transition: opacity 0.3s ease;
   }
 
   .kill-card:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(102, 126, 234, 0.3);
+    background: rgba(25, 25, 35, 0.8);
+    border-color: rgba(239, 68, 68, 0.4);
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 24px rgba(239, 68, 68, 0.2), 0 4px 12px rgba(0, 0, 0, 0.4);
   }
 
   .kill-card:hover::before {
@@ -291,24 +295,25 @@
 
   .timestamp {
     font-size: 0.7rem;
-    color: #888;
+    color: #6b7280;
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
 
   .external-link {
-    color: #888;
+    color: #6b7280;
     display: flex;
     align-items: center;
-    transition: color 0.2s ease;
+    transition: all 0.2s ease;
     padding: 0.25rem;
-    border-radius: 4px;
+    border-radius: 6px;
   }
 
   .external-link:hover {
-    color: #667eea;
-    background: rgba(102, 126, 234, 0.1);
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.15);
+    transform: scale(1.1);
   }
 
   .combatants {
@@ -349,13 +354,17 @@
   }
 
   .victim-badge {
-    background: rgba(239, 68, 68, 0.15);
+    background: rgba(239, 68, 68, 0.2);
     color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
   }
 
   .attacker-badge {
-    background: rgba(34, 197, 94, 0.15);
+    background: rgba(34, 197, 94, 0.2);
     color: #86efac;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.2);
   }
 
   .solo-badge {
@@ -463,12 +472,13 @@
   .vs-text {
     font-size: 0.6rem;
     font-weight: 800;
-    color: #667eea;
-    background: rgba(102, 126, 234, 0.1);
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.15);
     padding: 0.25rem 0.5rem;
-    border-radius: 5px;
+    border-radius: 6px;
     letter-spacing: 0.08em;
-    border: 1px solid rgba(102, 126, 234, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
   }
 
   .location-footer {
@@ -476,16 +486,17 @@
     align-items: center;
     gap: 0.4rem;
     padding-top: 0.5rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid rgba(139, 92, 246, 0.15);
     font-size: 0.75rem;
   }
 
   .location-icon {
-    color: #667eea;
+    color: #fca5a5;
     flex-shrink: 0;
-    opacity: 0.7;
+    opacity: 0.8;
     width: 12px;
     height: 12px;
+    filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.4));
   }
 
   .location-text {
