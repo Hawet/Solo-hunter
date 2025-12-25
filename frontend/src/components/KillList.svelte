@@ -1,5 +1,73 @@
 <script>
+  import { onMount, onDestroy } from 'svelte';
+  
   export let kills = [];
+
+  let tooltipElement = null;
+  let tooltip = {
+    visible: false,
+    text: '',
+    x: 0,
+    y: 0
+  };
+
+  function showTooltip(event, text) {
+    tooltip = {
+      visible: true,
+      text: text,
+      x: event.clientX,
+      y: event.clientY
+    };
+    updateTooltipDOM();
+  }
+
+  function updateTooltipPosition(event) {
+    if (tooltip.visible) {
+      tooltip.x = event.clientX;
+      tooltip.y = event.clientY;
+      updateTooltipDOM();
+    }
+  }
+
+  function hideTooltip() {
+    tooltip.visible = false;
+    updateTooltipDOM();
+  }
+
+  function updateTooltipDOM() {
+    if (!tooltipElement) return;
+    
+    if (tooltip.visible) {
+      tooltipElement.style.display = 'block';
+      tooltipElement.style.left = `${tooltip.x}px`;
+      tooltipElement.style.top = `${tooltip.y}px`;
+      tooltipElement.textContent = tooltip.text;
+    } else {
+      tooltipElement.style.display = 'none';
+    }
+  }
+
+  onMount(() => {
+    // Create tooltip element and append to body
+    tooltipElement = document.createElement('div');
+    tooltipElement.className = 'global-tooltip';
+    tooltipElement.style.display = 'none';
+    tooltipElement.style.position = 'fixed';
+    tooltipElement.style.pointerEvents = 'none';
+    tooltipElement.style.zIndex = '99999';
+    document.body.appendChild(tooltipElement);
+    
+    // Add mousemove listener
+    window.addEventListener('mousemove', updateTooltipPosition);
+  });
+
+  onDestroy(() => {
+    // Remove tooltip element and event listener
+    if (tooltipElement && tooltipElement.parentNode) {
+      tooltipElement.parentNode.removeChild(tooltipElement);
+    }
+    window.removeEventListener('mousemove', updateTooltipPosition);
+  });
 
   function formatTime(timeString) {
     if (!timeString) return 'Unknown';
@@ -113,14 +181,18 @@
                             <span class="slot-label">{slotType}:</span>
                             <div class="slot-items">
                               {#each slotItems as item}
-                                <div class="item-icon-wrapper">
+                                <div 
+                                  class="item-icon-wrapper"
+                                  on:mouseenter={(e) => showTooltip(e, item.name)}
+                                  on:mousemove={(e) => updateTooltipPosition(e)}
+                                  on:mouseleave={hideTooltip}
+                                >
                                   <img 
                                     src={item.icon_url} 
                                     alt={item.name}
                                     class="item-icon"
                                     on:error={(e) => e.target.style.display = 'none'}
                                   />
-                                  <span class="item-tooltip">{item.name}</span>
                                 </div>
                               {/each}
                             </div>
@@ -580,13 +652,6 @@
     z-index: 10;
   }
 
-  .item-icon-wrapper:hover .item-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-    transition-delay: 0.1s;
-  }
-
   .item-icon {
     width: 100%;
     height: 100%;
@@ -596,11 +661,9 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
   }
 
-  .item-tooltip {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%) translateY(0);
+  :global(.global-tooltip) {
+    position: fixed !important;
+    transform: translate(-50%, calc(-100% - 12px));
     background: rgba(0, 0, 0, 0.95);
     color: #fff;
     padding: 0.4rem 0.6rem;
@@ -608,18 +671,17 @@
     font-size: 0.7rem;
     white-space: nowrap;
     pointer-events: none;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0s linear 0.15s;
-    z-index: 1000;
+    z-index: 99999;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
     border: 1px solid rgba(255, 255, 255, 0.1);
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
+    animation: tooltipFadeIn 0.1s ease-out;
+    isolation: isolate;
   }
 
-  .item-tooltip::after {
+  :global(.global-tooltip::after) {
     content: '';
     position: absolute;
     top: 100%;
@@ -628,6 +690,17 @@
     border: 4px solid transparent;
     border-top-color: rgba(0, 0, 0, 0.95);
     filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
+  }
+
+  @keyframes tooltipFadeIn {
+    from {
+      opacity: 0;
+      transform: translate(-50%, calc(-100% - 12px)) scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, calc(-100% - 12px)) scale(1);
+    }
   }
 
   /* Responsive design */
