@@ -44,16 +44,18 @@ class ZKillboardRedisQ:
         self.cache_dir.mkdir(exist_ok=True)
         self.items_cache_file = self.cache_dir / "items.json"
         self.ships_cache_file = self.cache_dir / "ships.json"
+        self.map_cache_file = self.cache_dir / "map_data.json"
         
         # In-memory caches (loaded from files)
         self.items_cache: Dict[int, str] = {}  # type_id -> name
         self.ships_cache: Dict[int, str] = {}  # type_id -> name
+        self.map_cache: Dict = {}  # Full map data cache
         
         # Load existing caches
         self._load_cache()
         
     def _load_cache(self):
-        """Load cached items and ships from JSON files"""
+        """Load cached items, ships, and map data from JSON files"""
         try:
             if self.items_cache_file.exists():
                 with open(self.items_cache_file, 'r', encoding='utf-8') as f:
@@ -71,6 +73,17 @@ class ZKillboardRedisQ:
         except Exception as e:
             print(f"Error loading ships cache: {e}")
             self.ships_cache = {}
+        
+        try:
+            if self.map_cache_file.exists():
+                with open(self.map_cache_file, 'r', encoding='utf-8') as f:
+                    self.map_cache = json.load(f)
+                systems_count = len(self.map_cache.get('systems', {}))
+                stargates_count = len(self.map_cache.get('stargates', {}))
+                print(f"Loaded map cache: {systems_count} systems, {stargates_count} stargates")
+        except Exception as e:
+            print(f"Error loading map cache: {e}")
+            self.map_cache = {'systems': {}, 'stargates': {}, 'regions': {}}
     
     def _save_items_cache(self):
         """Save items cache to JSON file"""
@@ -87,6 +100,14 @@ class ZKillboardRedisQ:
                 json.dump(self.ships_cache, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Error saving ships cache: {e}")
+    
+    def _save_map_cache(self):
+        """Save map data cache to JSON file"""
+        try:
+            with open(self.map_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.map_cache, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving map cache: {e}")
     
     async def connect(self):
         """Start polling RedisQ for killmails"""
@@ -585,6 +606,199 @@ class ZKillboardRedisQ:
         # Sort by count descending
         stats.sort(key=lambda x: x["count"], reverse=True)
         return stats
+    
+    async def get_system_connections(self, system_id: int) -> List[Dict]:
+        """Get stargate connections for a system"""
+        if not self.session:
+            return []
+        
+        try:
+            # Get system info which includes stargates
+            url = f"{self.esi_base_url}/v4/universe/systems/{system_id}/"
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    system_data = await response.json()
+                    stargates = system_data.get('stargates', [])
+                    
+                    # Get destination system for each stargate
+                    connections = []
+                    for stargate_id in stargates:
+                        try:
+                            stargate_url = f"{self.esi_base_url}/v1/universe/stargates/{stargate_id}/"
+                            async with self.session.get(stargate_url) as sg_response:
+                                if sg_response.status == 200:
+                                    stargate_data = await sg_response.json()
+                                    destination_id = stargate_data.get('destination', {}).get('system_id')
+                                    if destination_id:
+                                        # Get destination system name
+                                        dest_system_info = await self._get_system_info(destination_id)
+                                        connections.append({
+                                            "from_system_id": system_id,
+                                            "to_system_id": destination_id,
+                                            "to_system_name": dest_system_info.get('name'),
+                                            "stargate_id": stargate_id
+                                        })
+                        except Exception as e:
+                            print(f"Error fetching stargate {stargate_id}: {e}")
+                            continue
+                    
+                    return connections
+                else:
+                    return []
+        except Exception as e:
+            print(f"Error fetching system connections: {e}")
+            return []
+    
+    def get_active_systems(self) -> List[Dict]:
+        """Get systems with recent kills for map visualization"""
+        # Extract unique systems from recent kills
+        systems_map = {}
+        for kill in self.recent_kills:
+            system_id = kill.get('solar_system_id')
+            if system_id:
+                if system_id not in systems_map:
+                    systems_map[system_id] = {
+                        "system_id": system_id,
+                        "system_name": kill.get('solar_system_name'),
+                        "region_id": kill.get('region_id'),
+                        "region_name": kill.get('region_name'),
+                        "kill_count": 0
+                    }
+                systems_map[system_id]["kill_count"] += 1
+        
+        return list(systems_map.values())
+    
+    async def get_map_data(self, force_refresh: bool = False) -> Dict:
+        """Get full map data (systems, stargates, regions) with caching"""
+        # Check cache first if not forcing refresh
+        if not force_refresh and self.map_cache.get('systems') and len(self.map_cache.get('systems', {})) > 0:
+            return self.map_cache
+        
+        if not self.session:
+            return self.map_cache if self.map_cache else {'systems': {}, 'stargates': {}, 'regions': {}}
+        
+        print("Fetching map data from ESI (this may take a while)...")
+        
+        try:
+            # Initialize cache structure
+            systems_data = {}
+            stargates_data = {}
+            regions_data = {}
+            
+            # Get all regions first
+            regions_url = f"{self.esi_base_url}/v1/universe/regions/"
+            async with self.session.get(regions_url) as response:
+                if response.status == 200:
+                    region_ids = await response.json()
+                    print(f"Found {len(region_ids)} regions")
+                    
+                    # Resolve region names
+                    region_names = await self._resolve_names(region_ids)
+                    for region_id in region_ids:
+                        regions_data[region_id] = {
+                            "region_id": region_id,
+                            "name": region_names.get(region_id, f"Region {region_id}")
+                        }
+            
+            # Get all constellations
+            constellations_url = f"{self.esi_base_url}/v1/universe/constellations/"
+            async with self.session.get(constellations_url) as response:
+                if response.status == 200:
+                    constellation_ids = await response.json()
+                    print(f"Found {len(constellation_ids)} constellations")
+            
+            # Get all systems
+            systems_url = f"{self.esi_base_url}/v1/universe/systems/"
+            async with self.session.get(systems_url) as response:
+                if response.status == 200:
+                    system_ids = await response.json()
+                    print(f"Found {len(system_ids)} systems, fetching details...")
+                    
+                    # Fetch system details in batches to avoid rate limiting
+                    batch_size = 50
+                    for i in range(0, len(system_ids), batch_size):
+                        batch = system_ids[i:i + batch_size]
+                        print(f"Processing systems {i+1}-{min(i+batch_size, len(system_ids))}...")
+                        
+                        for system_id in batch:
+                            try:
+                                system_url = f"{self.esi_base_url}/v4/universe/systems/{system_id}/"
+                                async with self.session.get(system_url) as sys_response:
+                                    if sys_response.status == 200:
+                                        system_data = await sys_response.json()
+                                        
+                                        # Get constellation info
+                                        constellation_id = system_data.get('constellation_id')
+                                        region_id = None
+                                        if constellation_id:
+                                            const_url = f"{self.esi_base_url}/v1/universe/constellations/{constellation_id}/"
+                                            async with self.session.get(const_url) as const_response:
+                                                if const_response.status == 200:
+                                                    const_data = await const_response.json()
+                                                    region_id = const_data.get('region_id')
+                                        
+                                        systems_data[system_id] = {
+                                            "system_id": system_id,
+                                            "name": system_data.get('name'),
+                                            "constellation_id": constellation_id,
+                                            "region_id": region_id,
+                                            "position": system_data.get('position', {}),
+                                            "security_status": system_data.get('security_status', 0),
+                                            "stargates": system_data.get('stargates', [])
+                                        }
+                                        
+                                        # Store stargate connections
+                                        for stargate_id in system_data.get('stargates', []):
+                                            if stargate_id not in stargates_data:
+                                                stargates_data[stargate_id] = {
+                                                    "stargate_id": stargate_id,
+                                                    "from_system_id": system_id
+                                                }
+                                        
+                                        # Small delay to avoid rate limiting
+                                        await asyncio.sleep(0.1)
+                            except Exception as e:
+                                print(f"Error fetching system {system_id}: {e}")
+                                continue
+                        
+                        # Longer delay between batches
+                        await asyncio.sleep(1)
+            
+            # Fetch stargate destinations
+            print(f"Fetching {len(stargates_data)} stargate destinations...")
+            for stargate_id, stargate_info in list(stargates_data.items()):
+                try:
+                    stargate_url = f"{self.esi_base_url}/v1/universe/stargates/{stargate_id}/"
+                    async with self.session.get(stargate_url) as sg_response:
+                        if sg_response.status == 200:
+                            sg_data = await sg_response.json()
+                            destination = sg_data.get('destination', {})
+                            stargate_info['to_system_id'] = destination.get('system_id')
+                            stargate_info['to_stargate_id'] = destination.get('stargate_id')
+                    await asyncio.sleep(0.1)
+                except Exception as e:
+                    print(f"Error fetching stargate {stargate_id}: {e}")
+                    continue
+            
+            # Update cache
+            self.map_cache = {
+                'systems': systems_data,
+                'stargates': stargates_data,
+                'regions': regions_data
+            }
+            
+            # Save to file
+            self._save_map_cache()
+            
+            print(f"Map data cached: {len(systems_data)} systems, {len(stargates_data)} stargates, {len(regions_data)} regions")
+            
+            return self.map_cache
+            
+        except Exception as e:
+            print(f"Error fetching map data: {e}")
+            import traceback
+            traceback.print_exc()
+            return self.map_cache if self.map_cache else {'systems': {}, 'stargates': {}, 'regions': {}}
     
     def is_connected(self) -> bool:
         """Check if RedisQ is connected"""

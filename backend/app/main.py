@@ -78,3 +78,39 @@ async def get_region_stats():
     if zkill_ws:
         return {"regions": zkill_ws.get_region_stats()}
     return {"regions": []}
+
+@app.get("/api/systems/{system_id}/connections")
+async def get_system_connections(system_id: int):
+    """Get stargate connections for a system"""
+    global zkill_ws
+    if zkill_ws:
+        connections = await zkill_ws.get_system_connections(system_id)
+        return {"connections": connections}
+    return {"connections": []}
+
+@app.get("/api/map/active-systems")
+async def get_active_systems():
+    """Get systems with recent kills for map visualization"""
+    global zkill_ws
+    if zkill_ws:
+        active_systems = zkill_ws.get_active_systems()
+        return {"systems": active_systems}
+    return {"systems": []}
+
+@app.get("/api/map/data")
+async def get_map_data(force_refresh: bool = False):
+    """Get full map data (systems, stargates, regions) with caching"""
+    global zkill_ws
+    if zkill_ws:
+        map_data = await zkill_ws.get_map_data(force_refresh=force_refresh)
+        return map_data
+    return {"systems": {}, "stargates": {}, "regions": {}}
+
+@app.get("/api/map/data")
+async def get_map_data(force_refresh: bool = False):
+    """Get full map data (systems, stargates, regions) with caching"""
+    global zkill_ws
+    if zkill_ws:
+        map_data = await zkill_ws.get_map_data(force_refresh=force_refresh)
+        return map_data
+    return {"systems": {}, "stargates": {}, "regions": {}}

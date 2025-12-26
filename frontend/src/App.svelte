@@ -2,9 +2,11 @@
   import { onMount, onDestroy } from 'svelte';
   import KillList from './components/KillList.svelte';
   import RegionStats from './components/RegionStats.svelte';
+  import StarMap from './components/StarMap.svelte';
 
   let kills = [];
   let regions = [];
+  let activeSystems = [];
   let loading = true;
   let error = null;
   let pollInterval;
@@ -37,6 +39,13 @@
       if (regionsResponse.ok) {
         const regionsData = await regionsResponse.json();
         regions = regionsData.regions || [];
+      }
+      
+      // Fetch active systems for map
+      const activeSystemsResponse = await fetch(`${API_URL}/api/map/active-systems`);
+      if (activeSystemsResponse.ok) {
+        const activeSystemsData = await activeSystemsResponse.json();
+        activeSystems = activeSystemsData.systems || [];
       }
       
       // Check connection status
@@ -149,6 +158,11 @@
       {#if regions.length > 0}
         <RegionStats {regions} />
       {/if}
+      
+      <div class="map-section">
+        <StarMap {activeSystems} apiUrl={API_URL} />
+      </div>
+      
       <KillList {kills} />
     {/if}
   </div>
@@ -452,6 +466,11 @@
     backdrop-filter: blur(20px);
     border: 1px solid rgba(239, 68, 68, 0.15);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  
+  .map-section {
+    margin-bottom: 2rem;
+    height: 700px;
   }
 
   .loading,

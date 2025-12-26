@@ -8,11 +8,12 @@
     "preview": "vite preview --host"
   },
   "dependencies": {
-    "svelte": "^3.59.0"
+    "svelte": "^3.59.0",
+    "vis-data": "^8.0.3",
+    "vis-network": "^10.0.2"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^2.5.3",
     "vite": "^4.5.0"
   }
 }
-
