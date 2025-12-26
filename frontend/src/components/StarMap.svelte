@@ -29,8 +29,19 @@
       
       Network = window.vis.Network;
       await loadMapData();
+      
+      // Wait a bit for the container to be rendered
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       if (mapData && mapContainer && Network) {
-        initializeMap();
+        // Ensure container has dimensions
+        if (mapContainer.offsetWidth === 0 || mapContainer.offsetHeight === 0) {
+          console.warn('Map container has no dimensions, waiting...');
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        await initializeMap(true); // Pass true to use cache if available
+      } else {
+        console.log('Missing requirements:', { mapData: !!mapData, mapContainer: !!mapContainer, Network: !!Network });
       }
     } catch (err) {
       console.error('Error loading vis-network:', err);
@@ -40,6 +51,9 @@
   });
   
   onDestroy(() => {
+    if (reinitTimeout) {
+      clearTimeout(reinitTimeout);
+    }
     if (network) {
       network.destroy();
     }
@@ -47,12 +61,27 @@
   
   async function loadMapData() {
     try {
-      loading = true;
+      // Only show loading if we don't have data yet
+      if (!mapData) {
+        loading = true;
+      }
+      
       const response = await fetch(`${apiUrl}/api/map/data`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      mapData = await response.json();
+      const data = await response.json();
+      // Handle both direct map_data response and wrapped response
+      mapData = data.map_data || data;
+      console.log('Map data loaded:', {
+        systems: Object.keys(mapData.systems || {}).length,
+        stargates: Object.keys(mapData.stargates || {}).length,
+        regions: Object.keys(mapData.regions || {}).length
+      });
+      
+      // Try to load cached positions
+      await loadCachedPositions();
+      
       error = null;
     } catch (err) {
       console.error('Error loading map data:', err);
@@ -62,8 +91,49 @@
     }
   }
   
-  function initializeMap() {
-    if (!mapData || !mapContainer) return;
+  async function loadCachedPositions() {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.version === CACHE_VERSION && parsed.positions) {
+          cachedPositions = parsed.positions;
+          console.log('Loaded cached positions for', Object.keys(cachedPositions).length, 'systems');
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn('Error loading cached positions:', err);
+    }
+    return false;
+  }
+  
+  function saveCachedPositions(positions) {
+    try {
+      const data = {
+        version: CACHE_VERSION,
+        positions: positions,
+        timestamp: Date.now()
+      };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+      console.log('Saved cached positions for', Object.keys(positions).length, 'systems');
+    } catch (err) {
+      console.warn('Error saving cached positions:', err);
+      // If localStorage is full, try to clear old cache
+      try {
+        localStorage.removeItem(CACHE_KEY);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+      } catch (e) {
+        console.error('Failed to save cache even after clearing:', e);
+      }
+    }
+  }
+  
+  async function initializeMap(useCache = true) {
+    if (!mapData || !mapContainer || !Network) {
+      console.log('Cannot initialize map:', { mapData: !!mapData, mapContainer: !!mapContainer, Network: !!Network });
+      return;
+    }
     
     // Create active systems lookup
     const activeSystemIds = new Set(activeSystems.map(s => s.system_id));
@@ -72,99 +142,153 @@
       activeSystemKills[s.system_id] = s.kill_count || 0;
     });
     
-    // Prepare nodes (systems)
-    const systems = mapData.systems || {};
+    // Prepare nodes (systems) - SHOW ALL SYSTEMS
+    const allSystems = mapData.systems || {};
+    console.log('Total systems to render:', Object.keys(allSystems).length);
+    
+    if (Object.keys(allSystems).length === 0) {
+      console.warn('No systems found in map data');
+      error = 'No systems found in map data. The cache may be empty.';
+      return;
+    }
+    
+    rendering = true;
     const systemNodes = [];
+    const systems = {};
     
-    // Use system positions if available, otherwise use a layout algorithm
-    const hasPositions = Object.values(systems).some(s => s.position && s.position.x !== undefined);
+    // Use system positions if available
+    const hasPositions = Object.values(allSystems).some(s => s.position && s.position.x !== undefined);
     
-    Object.values(systems).forEach(system => {
-      const isActive = activeSystemIds.has(system.system_id);
-      const killCount = activeSystemKills[system.system_id] || 0;
-      
-      // Determine color based on security status and activity
-      let color = '#666666'; // Default gray
-      if (isActive) {
-        color = '#ef4444'; // Red for active systems
-      } else if (system.security_status >= 0.5) {
-        color = '#22c55e'; // Green for high sec
-      } else if (system.security_status > 0) {
-        color = '#fbbf24'; // Yellow for low sec
-      } else {
-        color = '#dc2626'; // Dark red for null sec
-      }
-      
-      // Calculate position
-      let x, y, z;
-      if (hasPositions && system.position) {
-        // Use actual EVE positions (scaled down)
-        x = system.position.x / 1000000000; // Scale down
-        y = system.position.y / 1000000000;
-        z = system.position.z / 1000000000;
-      } else {
-        // Random position for now (will be improved with layout algorithm)
-        x = (Math.random() - 0.5) * 1000;
-        y = (Math.random() - 0.5) * 1000;
-        z = (Math.random() - 0.5) * 1000;
-      }
-      
-      systemNodes.push({
-        id: system.system_id,
-        label: system.name || `System ${system.system_id}`,
-        x: x,
-        y: y,
-        z: z,
-        color: {
-          background: color,
-          border: isActive ? '#ff0000' : '#333333',
-          highlight: {
-            background: isActive ? '#ff4444' : '#888888',
-            border: '#ffffff'
-          }
-        },
-        size: isActive ? 20 + (killCount * 2) : 10,
-        font: {
-          color: '#ffffff',
-          size: isActive ? 14 : 12,
-          face: 'Arial'
-        },
-        title: `${system.name || 'Unknown'}\nSecurity: ${system.security_status?.toFixed(2) || 'N/A'}\n${isActive ? `Kills: ${killCount}` : ''}`,
-        systemData: system
-      });
-    });
+    // Process ALL systems in batches to avoid blocking
+    const systemArray = Object.keys(allSystems);
+    const batchSize = 100; // Larger batches since we're doing async
     
-    // Prepare edges (stargates)
-    const stargates = mapData.stargates || {};
-    const systemEdges = [];
+    console.log('Building nodes for', systemArray.length, 'systems...');
     
-    Object.values(stargates).forEach(stargate => {
-      const fromId = stargate.from_system_id;
-      const toId = stargate.to_system_id;
+    for (let i = 0; i < systemArray.length; i += batchSize) {
+      const batch = systemArray.slice(i, i + batchSize);
       
-      if (fromId && toId && systems[fromId] && systems[toId]) {
-        // Check if either system is active
-        const fromActive = activeSystemIds.has(fromId);
-        const toActive = activeSystemIds.has(toId);
-        const isActive = fromActive || toActive;
+      batch.forEach(systemIdStr => {
+        const system = allSystems[systemIdStr];
+        if (!system) return;
         
-        systemEdges.push({
-          id: stargate.stargate_id,
-          from: fromId,
-          to: toId,
+        const systemId = typeof system.system_id === 'string' ? parseInt(system.system_id, 10) : system.system_id;
+        systems[systemId] = system;
+        const isActive = activeSystemIds.has(systemId);
+        const killCount = activeSystemKills[systemId] || 0;
+        
+        // Determine color based on security status and activity
+        let color = '#666666'; // Default gray
+        if (isActive) {
+          color = '#ef4444'; // Red for active systems
+        } else if (system.security_status >= 0.5) {
+          color = '#22c55e'; // Green for high sec
+        } else if (system.security_status > 0) {
+          color = '#fbbf24'; // Yellow for low sec
+        } else {
+          color = '#dc2626'; // Dark red for null sec
+        }
+        
+        // Calculate position - use cached if available, otherwise use EVE positions or random
+        let x, y, z;
+        if (useCache && cachedPositions && cachedPositions[systemId]) {
+          // Use cached position
+          const cached = cachedPositions[systemId];
+          x = cached.x;
+          y = cached.y;
+          z = cached.z;
+        } else if (hasPositions && system.position) {
+          // Use actual EVE positions (scaled down)
+          x = system.position.x / 1000000000;
+          y = system.position.y / 1000000000;
+          z = system.position.z / 1000000000;
+        } else {
+          // Random position (will be replaced by physics layout)
+          x = (Math.random() - 0.5) * 1000;
+          y = (Math.random() - 0.5) * 1000;
+          z = (Math.random() - 0.5) * 1000;
+        }
+        
+        systemNodes.push({
+          id: systemId,
+          label: isActive ? (system.name || `System ${systemId}`) : '', // Only show labels for active systems
+          x: x,
+          y: y,
+          z: z,
+          fixed: useCache && cachedPositions && cachedPositions[systemId] ? { x: true, y: true, z: true } : false, // Fix position if from cache
           color: {
-            color: isActive ? '#ef4444' : '#444444',
-            highlight: '#ffffff',
-            opacity: isActive ? 0.8 : 0.3
+            background: color,
+            border: isActive ? '#ff0000' : '#333333',
+            highlight: {
+              background: isActive ? '#ff4444' : '#888888',
+              border: '#ffffff'
+            }
           },
-          width: isActive ? 2 : 1,
-          smooth: {
-            type: 'continuous',
-            roundness: 0.5
-          }
+          size: isActive ? 20 + (killCount * 2) : 6, // Smaller size for non-active to reduce visual clutter
+          font: {
+            color: '#ffffff',
+            size: isActive ? 14 : 0, // No font for non-active to reduce rendering
+            face: 'Arial'
+          },
+          title: `${system.name || 'Unknown'}\nSecurity: ${system.security_status?.toFixed(2) || 'N/A'}\n${isActive ? `Kills: ${killCount}` : ''}`,
+          systemData: system
         });
+      });
+      
+      // Yield to browser between batches
+      if (i + batchSize < systemArray.length) {
+        await new Promise(resolve => requestAnimationFrame(resolve));
       }
-    });
+    }
+    
+    // Prepare edges (stargates) - show ALL connections
+    const systemEdges = [];
+    const allSystemIds = new Set(Object.keys(allSystems).map(id => parseInt(id, 10)));
+    
+    console.log('Building edges for', Object.keys(stargates).length, 'stargates...');
+    
+    // Process edges in batches too
+    const stargateArray = Object.values(stargates);
+    const edgeBatchSize = 500;
+    
+    for (let i = 0; i < stargateArray.length; i += edgeBatchSize) {
+      const batch = stargateArray.slice(i, i + edgeBatchSize);
+      
+      batch.forEach(stargate => {
+        // Ensure IDs are numbers
+        const fromId = typeof stargate.from_system_id === 'string' ? parseInt(stargate.from_system_id, 10) : stargate.from_system_id;
+        const toId = typeof stargate.to_system_id === 'string' ? parseInt(stargate.to_system_id, 10) : stargate.to_system_id;
+        
+        // Only add edge if both systems exist
+        if (fromId && toId && allSystemIds.has(fromId) && allSystemIds.has(toId)) {
+          // Check if either system is active
+          const fromActive = activeSystemIds.has(fromId);
+          const toActive = activeSystemIds.has(toId);
+          const isActive = fromActive || toActive;
+          
+          systemEdges.push({
+            id: stargate.stargate_id,
+            from: fromId,
+            to: toId,
+            color: {
+              color: isActive ? '#ef4444' : '#333333',
+              highlight: '#ffffff',
+              opacity: isActive ? 0.8 : 0.1 // Very low opacity for non-active edges
+            },
+            width: isActive ? 2 : 0.5, // Very thin for non-active
+            smooth: {
+              type: 'continuous',
+              roundness: 0.5
+            }
+          });
+        }
+      });
+      
+      // Yield to browser between batches
+      if (i + edgeBatchSize < stargateArray.length) {
+        await new Promise(resolve => requestAnimationFrame(resolve));
+      }
+    }
     
     nodes = systemNodes;
     edges = systemEdges;
@@ -190,18 +314,22 @@
         }
       },
       physics: {
-        enabled: true,
+        enabled: !(useCache && cachedPositions), // Disable physics if we have cached positions
         stabilization: {
-          enabled: true,
-          iterations: 200
+          enabled: !(useCache && cachedPositions), // Don't stabilize if using cache
+          iterations: 150, // More iterations for better layout when calculating
+          fit: true,
+          updateInterval: 25
         },
         barnesHut: {
           gravitationalConstant: -2000,
           centralGravity: 0.1,
           springLength: 200,
           springConstant: 0.04,
-          damping: 0.09
-        }
+          damping: 0.09,
+          avoidOverlap: 0.5
+        },
+        solver: 'barnesHut'
       },
       interaction: {
         zoomView: true,
@@ -211,33 +339,95 @@
       }
     };
     
-    if (!Network) return;
-    network = new Network(mapContainer, data, options);
+    if (!Network) {
+      console.error('Network class not available');
+      return;
+    }
     
-    // Add event listeners
-    network.on('click', (params) => {
-      if (params.nodes.length > 0) {
-        const systemId = params.nodes[0];
-        const system = systems[systemId];
-        if (system) {
-          console.log('Clicked system:', system.name, system);
-          // You can emit an event or update state here
-        }
+    try {
+      network = new Network(mapContainer, data, options);
+      console.log('Map initialized successfully with', nodes.length, 'nodes and', edges.length, 'edges');
+      
+      // If we don't have cached positions, calculate layout and cache it
+      if (!useCache || !cachedPositions) {
+        console.log('Calculating layout (this may take a while)...');
+        rendering = true;
+        
+        // Disable physics after stabilization and cache the positions
+        network.once('stabilizationEnd', () => {
+          if (network) {
+            console.log('Layout calculation complete, caching positions...');
+            
+            // Extract positions from all nodes
+            const positions = {};
+            network.getPositions().forEach((pos, nodeId) => {
+              positions[nodeId] = {
+                x: pos.x,
+                y: pos.y,
+                z: pos.z || 0
+              };
+            });
+            
+            // Save to cache
+            saveCachedPositions(positions);
+            cachedPositions = positions;
+            
+            // Disable physics to prevent continuous computation
+            network.setOptions({ physics: { enabled: false } });
+            console.log('Physics disabled after stabilization, positions cached');
+            rendering = false;
+          }
+        });
+        
+        // Also handle stabilization progress to show user feedback
+        network.on('stabilizationProgress', (params) => {
+          const progress = Math.round(params.iterations / params.total * 100);
+          if (progress % 10 === 0) { // Log every 10%
+            console.log(`Layout calculation: ${progress}%`);
+          }
+        });
+      } else {
+        console.log('Using cached positions, skipping physics calculation');
+        rendering = false;
       }
-    });
-    
-    network.on('hoverNode', (params) => {
-      mapContainer.style.cursor = 'pointer';
-    });
-    
-    network.on('blurNode', () => {
-      mapContainer.style.cursor = 'default';
-    });
+      
+      // Add event listeners
+      network.on('click', (params) => {
+        if (params.nodes.length > 0) {
+          const systemId = params.nodes[0];
+          const system = systems[systemId] || systems[String(systemId)];
+          if (system) {
+            console.log('Clicked system:', system.name, system);
+            // You can emit an event or update state here
+          }
+        }
+      });
+      
+      network.on('hoverNode', (params) => {
+        mapContainer.style.cursor = 'pointer';
+      });
+      
+      network.on('blurNode', () => {
+        mapContainer.style.cursor = 'default';
+      });
+    } catch (err) {
+      console.error('Error creating network:', err);
+      error = 'Failed to create map visualization: ' + err.message;
+      return;
+    }
   }
   
-  // Re-initialize when active systems change
+  // Re-initialize when active systems change (debounced to prevent excessive re-renders)
+  let reinitTimeout;
   $: if (activeSystems && mapData && network) {
-    initializeMap();
+    clearTimeout(reinitTimeout);
+    reinitTimeout = setTimeout(async () => {
+      if (network) {
+        network.destroy();
+        network = null;
+      }
+      await initializeMap(true); // Always use cache when re-initializing
+    }, 500); // Debounce by 500ms
   }
 </script>
 
@@ -252,6 +442,12 @@
     <div class="error">
       <p>Error loading map: {error}</p>
       <button on:click={loadMapData}>Retry</button>
+    </div>
+  {:else if rendering}
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>Calculating map layout...</p>
+      <p class="loading-note">This only happens once, positions will be cached</p>
     </div>
   {:else}
     <div class="map-header">

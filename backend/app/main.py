@@ -105,12 +105,3 @@ async def get_map_data(force_refresh: bool = False):
         map_data = await zkill_ws.get_map_data(force_refresh=force_refresh)
         return map_data
     return {"systems": {}, "stargates": {}, "regions": {}}
-
-@app.get("/api/map/data")
-async def get_map_data(force_refresh: bool = False):
-    """Get full map data (systems, stargates, regions) with caching"""
-    global zkill_ws
-    if zkill_ws:
-        map_data = await zkill_ws.get_map_data(force_refresh=force_refresh)
-        return map_data
-    return {"systems": {}, "stargates": {}, "regions": {}}

@@ -2,18 +2,31 @@
   import { onMount, onDestroy } from 'svelte';
   import KillList from './components/KillList.svelte';
   import RegionStats from './components/RegionStats.svelte';
-  import StarMap from './components/StarMap.svelte';
+  import MapPage from './pages/MapPage.svelte';
+  import MapTestPage from './pages/MapTestPage.svelte';
 
   let kills = [];
   let regions = [];
-  let activeSystems = [];
   let loading = true;
   let error = null;
   let pollInterval;
   let connectionStatus = 'disconnected';
   let isPaused = false;
+  let currentPage = 'home';
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+  
+  // Simple hash-based routing
+  function handleHashChange() {
+    const hash = window.location.hash.slice(1) || '/';
+    if (hash === '/map') {
+      currentPage = 'map';
+    } else if (hash === '/map-test') {
+      currentPage = 'map-test';
+    } else {
+      currentPage = 'home';
+    }
+  }
 
   // Generate static star positions once
   const staticStars = Array.from({ length: 50 }, () => ({
@@ -41,13 +54,6 @@
         regions = regionsData.regions || [];
       }
       
-      // Fetch active systems for map
-      const activeSystemsResponse = await fetch(`${API_URL}/api/map/active-systems`);
-      if (activeSystemsResponse.ok) {
-        const activeSystemsData = await activeSystemsResponse.json();
-        activeSystems = activeSystemsData.systems || [];
-      }
-      
       // Check connection status
       const healthResponse = await fetch(`${API_URL}/api/health`);
       if (healthResponse.ok) {
@@ -64,12 +70,17 @@
   }
 
   onMount(() => {
+    // Set up routing
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    
     fetchKills();
     // Poll every 2 seconds for new kills
     pollInterval = setInterval(fetchKills, 2000);
   });
 
   onDestroy(() => {
+    window.removeEventListener('hashchange', handleHashChange);
     if (pollInterval) {
       clearInterval(pollInterval);
     }
@@ -129,43 +140,47 @@
       <h1>Solo Hunter</h1>
     </div>
     <p class="subtitle">EVE Online PvP Activity Monitor</p>
-    <div class="status-controls">
-      <div class="status-indicator">
-        <span class="status-dot" class:connected={connectionStatus === 'connected'} class:disconnected={connectionStatus !== 'connected'}></span>
-        <span class="status-text">
-          {connectionStatus === 'connected' ? 'Connected' : 
-           connectionStatus === 'disconnected' ? 'Connecting...' : 'Connection error'}
-        </span>
+      <div class="status-controls">
+        <div class="status-indicator">
+          <span class="status-dot" class:connected={connectionStatus === 'connected'} class:disconnected={connectionStatus !== 'connected'}></span>
+          <span class="status-text">
+            {connectionStatus === 'connected' ? 'Connected' : 
+             connectionStatus === 'disconnected' ? 'Connecting...' : 'Connection error'}
+          </span>
+        </div>
+        <button 
+          class="toggle-btn" 
+          class:paused={isPaused}
+          on:click={toggleParsing}
+          disabled={connectionStatus !== 'connected'}
+          title={isPaused ? 'Resume parsing' : 'Pause parsing'}
+        >
+          {isPaused ? '▶ Resume' : '⏸ Pause'}
+        </button>
+        <a href="#/map" class="map-link">🗺️ Star Map</a>
+        <a href="#/map-test" class="map-link">🧪 WebGL Test</a>
       </div>
-      <button 
-        class="toggle-btn" 
-        class:paused={isPaused}
-        on:click={toggleParsing}
-        disabled={connectionStatus !== 'connected'}
-        title={isPaused ? 'Resume parsing' : 'Pause parsing'}
-      >
-        {isPaused ? '▶ Resume' : '⏸ Pause'}
-      </button>
-    </div>
   </header>
 
-  <div class="container">
-    {#if loading}
-      <div class="loading">Loading recent kills...</div>
-    {:else if error}
-      <div class="error">Error: {error}</div>
-    {:else}
-      {#if regions.length > 0}
-        <RegionStats {regions} />
+  {#if currentPage === 'map'}
+    <MapPage />
+  {:else if currentPage === 'map-test'}
+    <MapTestPage />
+  {:else}
+    <div class="container">
+      {#if loading}
+        <div class="loading">Loading recent kills...</div>
+      {:else if error}
+        <div class="error">Error: {error}</div>
+      {:else}
+        {#if regions.length > 0}
+          <RegionStats {regions} />
+        {/if}
+        
+        <KillList {kills} />
       {/if}
-      
-      <div class="map-section">
-        <StarMap {activeSystems} apiUrl={API_URL} />
-      </div>
-      
-      <KillList {kills} />
-    {/if}
-  </div>
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -458,6 +473,23 @@
     box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
     border-color: rgba(16, 185, 129, 0.5);
   }
+  
+  .map-link {
+    padding: 0.5rem 1rem;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 6px;
+    color: #fca5a5;
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+  }
+  
+  .map-link:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #ef4444;
+  }
 
   .container {
     background: rgba(15, 15, 23, 0.7);
@@ -468,10 +500,6 @@
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
   
-  .map-section {
-    margin-bottom: 2rem;
-    height: 700px;
-  }
 
   .loading,
   .error {
