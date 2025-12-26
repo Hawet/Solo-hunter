@@ -139,9 +139,9 @@ export class DataPreprocessor {
       regionPositions.push({ regionId, position: centroid, bounds });
     });
     
-    // Apply minimal spacing to regions that are too close together
-    // This prevents overlapping while preserving the overall spatial layout
-    this._applyMinimalSpacing(regions, regionPositions);
+    // Apply scaling to spread regions to fill viewport while preserving relative positions
+    // This maintains their in-game spatial relationships while ensuring they fill the space
+    this._scaleRegionsToFillViewport(regions, regionPositions);
     
     return regions;
   }
@@ -193,8 +193,98 @@ export class DataPreprocessor {
   }
   
   /**
+   * Scale regions to fill viewport while preserving their relative in-game positions
+   * This maintains spatial relationships while ensuring regions fill the available space
+   */
+  _scaleRegionsToFillViewport(regions, regionPositions) {
+    const regionCount = regionPositions.length;
+    if (regionCount === 0) return;
+    
+    // Calculate bounding box of all region positions
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+    
+    regionPositions.forEach(region => {
+      const pos = region.position;
+      minX = Math.min(minX, pos.x);
+      maxX = Math.max(maxX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxY = Math.max(maxY, pos.y);
+      minZ = Math.min(minZ, pos.z);
+      maxZ = Math.max(maxZ, pos.z);
+    });
+    
+    // Calculate current size and center
+    const sizeX = maxX - minX;
+    const sizeY = maxY - minY;
+    const sizeZ = maxZ - minZ;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const centerZ = (minZ + maxZ) / 2;
+    
+    // If all regions are at the same position, use default spacing
+    if (sizeX < 0.001 && sizeY < 0.001) {
+      // Fallback: use grid layout if regions are all at same position
+      const gridSize = Math.ceil(Math.sqrt(regionCount));
+      const spacingX = 0.3;
+      const spacingY = 0.5; // More vertical spacing
+      
+      regionPositions.forEach((region, index) => {
+        const row = Math.floor(index / gridSize);
+        const col = index % gridSize;
+        const offsetX = (gridSize - 1) * spacingX / 2;
+        const offsetY = (gridSize - 1) * spacingY / 2;
+        
+        region.position.x = col * spacingX - offsetX;
+        region.position.y = row * spacingY - offsetY;
+        region.position.z = 0;
+        
+        const regionData = regions.get(region.regionId);
+        if (regionData) {
+          regionData.normalizedPosition = { ...region.position };
+        }
+      });
+      return;
+    }
+    
+    // Target range to fill (approximately [-1.5, 1.5] with some padding)
+    // Use different scaling for X and Y to increase vertical spacing
+    const targetRangeX = 2.8; // Horizontal range
+    const targetRangeY = 3.5; // Increased vertical range for more spacing
+    const scaleX = sizeX > 0.001 ? targetRangeX / sizeX : 1;
+    const scaleY = sizeY > 0.001 ? targetRangeY / sizeY : 1; // Larger scale for Y = more vertical spacing
+    
+    // Apply scaling and centering to all regions
+    // This preserves relative positions while filling the viewport with more vertical space
+    regionPositions.forEach(region => {
+      const pos = region.position;
+      
+      // Translate to origin, scale separately for X and Y, then translate to center
+      const translatedX = (pos.x - centerX) * scaleX;
+      const translatedY = (pos.y - centerY) * scaleY; // More vertical spacing
+      const translatedZ = (pos.z - centerZ) * Math.min(scaleX, scaleY);
+      
+      region.position.x = translatedX;
+      region.position.y = translatedY;
+      region.position.z = translatedZ;
+      
+      // Update region in map
+      const regionData = regions.get(region.regionId);
+      if (regionData) {
+        regionData.normalizedPosition = { ...region.position };
+      }
+    });
+    
+    // Apply minimal spacing to prevent overlaps while preserving relative positions
+    // This only pushes apart regions that are too close
+    this._applyMinimalSpacing(regions, regionPositions);
+  }
+  
+  /**
    * Apply minimal spacing to regions that are too close together
    * Only pushes apart regions that overlap, preserving overall spatial relationships
+   * @deprecated - Use _applyFullSpacing instead for better distribution
    */
   _applyMinimalSpacing(regions, regionPositions) {
     const regionCount = regionPositions.length;

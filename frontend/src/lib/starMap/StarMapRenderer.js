@@ -354,16 +354,17 @@ export class StarMapRenderer {
     this.nodeIds = nodeIds;
     this.nodeType = nodeType;
     
-    // Create labels for regions
+    // Create labels for regions or systems
     if (this.viewMode === 'regions') {
       this._createRegionLabels();
     } else {
-      this._removeLabels();
+      this._createSystemLabels();
     }
   }
   
   /**
    * Create text labels for regions
+   * Labels are clickable and store region ID for click detection
    */
   _createRegionLabels() {
     // Remove existing labels
@@ -373,9 +374,146 @@ export class StarMapRenderer {
       const sprite = this._createTextSprite(region.name);
       const pos = region.normalizedPosition;
       sprite.position.set(pos.x, pos.y, pos.z);
+      
+      // Store region ID in sprite userData for click detection
+      sprite.userData.regionId = regionId;
+      sprite.userData.nodeType = 'region';
+      
+      // Make sprite larger to increase clickable area
+      // This makes it easier to click on the label
+      const currentScale = sprite.scale.x;
+      sprite.scale.multiplyScalar(1.2); // Increase clickable area by 20%
+      
       this.scene.add(sprite);
       this.labelSprites.push(sprite);
     });
+  }
+  
+  /**
+   * Create text labels for systems
+   * Shows system names when viewing a region
+   */
+  _createSystemLabels() {
+    // Remove existing labels
+    this._removeLabels();
+    
+    const region = this.selectedRegionId ? this.regions.get(this.selectedRegionId) : null;
+    const systemIdsToShow = region ? region.systemIds : Array.from(this.systems.keys());
+    
+    // Calculate normalization if in region view
+    let normalizeScale = 1;
+    let normalizeCenter = { x: 0, y: 0, z: 0 };
+    if (region && region.bounds) {
+      const bounds = region.bounds;
+      const maxSize = Math.max(bounds.size.x, bounds.size.y, bounds.size.z);
+      normalizeScale = maxSize > 0 ? 0.8 / maxSize : 1;
+      normalizeCenter.x = (bounds.min.x + bounds.max.x) / 2;
+      normalizeCenter.y = (bounds.min.y + bounds.max.y) / 2;
+      normalizeCenter.z = (bounds.min.z + bounds.max.z) / 2;
+    }
+    
+    systemIdsToShow.forEach(systemId => {
+      const system = this.systems.get(systemId);
+      if (!system) return;
+      
+      // Get system name - check if it's in the system data
+      const systemName = system.name || `System ${systemId}`;
+      
+      // Calculate position (same logic as in _createNodes)
+      let pos;
+      if (region && region.bounds) {
+        const originalPos = system.normalizedPosition;
+        pos = {
+          x: (originalPos.x - normalizeCenter.x) * normalizeScale,
+          y: (originalPos.y - normalizeCenter.y) * normalizeScale,
+          z: (originalPos.z - normalizeCenter.z) * normalizeScale
+        };
+      } else {
+        pos = system.normalizedPosition;
+      }
+      
+      // Create smaller label for systems (compared to regions)
+      const sprite = this._createSystemTextSprite(systemName);
+      sprite.position.set(pos.x, pos.y, pos.z + 0.05); // Slightly above the system point
+      
+      // Store system ID in sprite userData
+      sprite.userData.systemId = systemId;
+      sprite.userData.nodeType = 'system';
+      
+      this.scene.add(sprite);
+      this.labelSprites.push(sprite);
+    });
+  }
+  
+  /**
+   * Create a text sprite for systems (smaller than region labels)
+   */
+  _createSystemTextSprite(text) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    
+    // Smaller font for system names
+    const fontSize = 48;
+    context.font = `bold ${fontSize}px Arial`;
+    const metrics = context.measureText(text);
+    const textWidth = metrics.width;
+    const textHeight = fontSize;
+    
+    // Set canvas size with padding (power of 2 for better performance)
+    const padding = 20;
+    canvas.width = Math.max(256, Math.pow(2, Math.ceil(Math.log2(textWidth + padding * 2))));
+    canvas.height = Math.max(128, Math.pow(2, Math.ceil(Math.log2(textHeight + padding * 2))));
+    
+    // Clear canvas
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw semi-transparent background for better readability
+    context.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    const bgPadding = 8;
+    context.fillRect(
+      canvas.width / 2 - textWidth / 2 - bgPadding,
+      canvas.height / 2 - textHeight / 2 - bgPadding,
+      textWidth + bgPadding * 2,
+      textHeight + bgPadding * 2
+    );
+    
+    // Set text style - white with subtle outline
+    context.font = `bold ${fontSize}px Arial`;
+    context.fillStyle = '#ffffff';
+    context.strokeStyle = '#888888'; // Gray outline for systems
+    context.lineWidth = 3;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    
+    // Draw text with outline
+    const x = canvas.width / 2;
+    const y = canvas.height / 2;
+    
+    // Draw stroke
+    context.strokeText(text, x, y);
+    // Draw fill
+    context.fillText(text, x, y);
+    
+    // Create texture from canvas
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    
+    // Create sprite material
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      alphaTest: 0.1,
+      depthTest: false, // Always render on top
+    });
+    
+    // Create sprite
+    const sprite = new THREE.Sprite(spriteMaterial);
+    
+    // Scale sprite - smaller than region labels
+    const baseScale = (textWidth + padding * 2) / canvas.width * 0.4;
+    sprite.scale.set(baseScale, baseScale * 0.25, 1);
+    
+    return sprite;
   }
   
   /**
@@ -743,10 +881,12 @@ export class StarMapRenderer {
       this.cameraController.update();
       
       // Update label scales based on zoom (so they stay readable)
-      if (this.viewMode === 'regions' && this.labelSprites.length > 0) {
+      if (this.labelSprites.length > 0) {
         const zoom = this.camera.zoom;
-        // Scale labels to stay readable - larger base scale for better visibility
-        const baseScale = 0.8 / Math.max(0.3, zoom); // Much larger and more visible
+        // Scale labels to stay readable - different scales for regions vs systems
+        const baseScale = this.viewMode === 'regions' 
+          ? 0.8 / Math.max(0.3, zoom) // Larger for regions
+          : 0.4 / Math.max(0.3, zoom); // Smaller for systems
         this.labelSprites.forEach(sprite => {
           // Maintain aspect ratio
           const aspectRatio = sprite.scale.y / sprite.scale.x;
@@ -870,8 +1010,6 @@ export class StarMapRenderer {
    * Handle click events
    */
   _onClick(event) {
-    if (!this.nodeMesh || !this.nodeIds) return;
-    
     // Calculate mouse position in normalized device coordinates (-1 to +1)
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -880,17 +1018,52 @@ export class StarMapRenderer {
     // Update raycaster
     this.raycaster.setFromCamera(this.mouse, this.camera);
     
-    // Check intersection with nodes
-    const intersects = this.raycaster.intersectObject(this.nodeMesh);
-    
-    if (intersects.length > 0) {
-      const pointIndex = intersects[0].index;
-      const nodeId = this.nodeIds[pointIndex];
-      const nodeType = this.nodeType[pointIndex];
+    if (this.viewMode === 'regions') {
+      // In region view, check for clicks on region labels first
+      // This makes clicking more precise - user must click on/near the label
+      if (this.labelSprites && this.labelSprites.length > 0) {
+        const labelIntersects = this.raycaster.intersectObjects(this.labelSprites, false);
+        
+        if (labelIntersects.length > 0) {
+          const clickedSprite = labelIntersects[0].object;
+          const regionId = clickedSprite.userData.regionId;
+          
+          if (regionId && this.regions.has(regionId)) {
+            // Clicked on a region label - switch to system view
+            this.viewRegion(regionId);
+            return;
+          }
+        }
+      }
       
-      if (nodeType === 'region' && this.viewMode === 'regions') {
-        // Clicked on a region - switch to system view
-        this.viewRegion(nodeId);
+      // Fallback: also check for clicks on region points (but prioritize labels)
+      if (this.nodeMesh && this.nodeIds) {
+        const intersects = this.raycaster.intersectObject(this.nodeMesh);
+        
+        if (intersects.length > 0) {
+          const pointIndex = intersects[0].index;
+          const nodeId = this.nodeIds[pointIndex];
+          const nodeType = this.nodeType[pointIndex];
+          
+          if (nodeType === 'region') {
+            // Clicked on a region point - switch to system view
+            this.viewRegion(nodeId);
+          }
+        }
+      }
+    } else {
+      // In system view, check for clicks on system nodes
+      if (!this.nodeMesh || !this.nodeIds) return;
+      
+      const intersects = this.raycaster.intersectObject(this.nodeMesh);
+      
+      if (intersects.length > 0) {
+        const pointIndex = intersects[0].index;
+        const nodeId = this.nodeIds[pointIndex];
+        const nodeType = this.nodeType[pointIndex];
+        
+        // Handle system clicks if needed in the future
+        // For now, only regions are clickable
       }
     }
   }

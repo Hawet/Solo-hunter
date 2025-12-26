@@ -3,7 +3,6 @@
   import KillList from './components/KillList.svelte';
   import RegionStats from './components/RegionStats.svelte';
   import MapPage from './pages/MapPage.svelte';
-  import MapTestPage from './pages/MapTestPage.svelte';
 
   let kills = [];
   let regions = [];
@@ -21,8 +20,6 @@
     const hash = window.location.hash.slice(1) || '/';
     if (hash === '/map') {
       currentPage = 'map';
-    } else if (hash === '/map-test') {
-      currentPage = 'map-test';
     } else {
       currentPage = 'home';
     }
@@ -158,15 +155,12 @@
           {isPaused ? '▶ Resume' : '⏸ Pause'}
         </button>
         <a href="#/map" class="map-link">🗺️ Star Map</a>
-        <a href="#/map-test" class="map-link">🧪 WebGL Test</a>
       </div>
   </header>
 
-  {#if currentPage === 'map'}
-    <MapPage />
-  {:else if currentPage === 'map-test'}
-    <MapTestPage />
-  {:else}
+      {#if currentPage === 'map'}
+        <MapPage />
+      {:else}
     <div class="container">
       {#if loading}
         <div class="loading">Loading recent kills...</div>
