@@ -2,7 +2,6 @@
   import { onMount, onDestroy } from 'svelte';
   import KillList from './components/KillList.svelte';
   import RegionStats from './components/RegionStats.svelte';
-  import MapPage from './pages/MapPage.svelte';
 
   let kills = [];
   let regions = [];
@@ -17,12 +16,7 @@
   
   // Simple hash-based routing
   function handleHashChange() {
-    const hash = window.location.hash.slice(1) || '/';
-    if (hash === '/map') {
-      currentPage = 'map';
-    } else {
-      currentPage = 'home';
-    }
+    currentPage = 'home';
   }
 
   // Generate static star positions once
@@ -154,13 +148,9 @@
         >
           {isPaused ? '▶ Resume' : '⏸ Pause'}
         </button>
-        <a href="#/map" class="map-link">🗺️ Star Map</a>
       </div>
   </header>
 
-      {#if currentPage === 'map'}
-        <MapPage />
-      {:else}
     <div class="container">
       {#if loading}
         <div class="loading">Loading recent kills...</div>
@@ -174,7 +164,6 @@
         <KillList {kills} />
       {/if}
     </div>
-  {/if}
 </main>
 
 <style>
