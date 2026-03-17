@@ -117,6 +117,25 @@ async def get_system_connections(system_id: int):
         return {"connections": connections}
     return {"connections": []}
 
+@app.get("/api/ships/names")
+async def get_ship_names():
+    """Return all known ship types with tags for client-side autocomplete."""
+    global zkill_ws
+    if zkill_ws:
+        data = zkill_ws.get_all_ship_types()
+        resp = JSONResponse(content={"ships": data})
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+    return {"ships": []}
+
+@app.get("/api/ships/search")
+async def search_ships(q: str = Query("", min_length=1), limit: int = Query(15, ge=1, le=50)):
+    """Search ship types by name (prefix + substring fallback)"""
+    global zkill_ws
+    if zkill_ws:
+        return {"ships": zkill_ws.search_ships(q, limit)}
+    return {"ships": []}
+
 @app.get("/api/map/active-systems")
 async def get_active_systems():
     """Get systems with recent kills for map visualization"""

@@ -15,13 +15,30 @@
   let selectedRegionId = null;
 
   let allSystems = [];
+  let allShips = [];
   let systemFilter = null;
+  let selectedShips = [];
+  let selectedTags = [];
 
-  $: filteredKills = systemFilter
-    ? kills.filter(k => systemFilter.systemIds.has(k.solar_system_id))
-    : selectedRegionId
-      ? kills.filter(k => k.region_id === selectedRegionId)
-      : kills;
+  function killMatchesShipFilter(kill, shipIds, tags) {
+    const attackerId = kill.attacker?.ship_type_id;
+    const attackerTags = kill.attacker?.ship_tags || [];
+
+    if (shipIds.size > 0 && shipIds.has(attackerId)) return true;
+    if (tags.length > 0 && tags.some(ft => attackerTags.includes(ft))) return true;
+    if (shipIds.size > 0 || tags.length > 0) return false;
+    return true;
+  }
+
+  $: shipFilterIds = new Set(selectedShips.map(s => s.type_id));
+  $: hasShipFilter = selectedShips.length > 0 || selectedTags.length > 0;
+
+  $: filteredKills = kills.filter(k => {
+    if (systemFilter && !systemFilter.systemIds.has(k.solar_system_id)) return false;
+    if (!systemFilter && selectedRegionId && k.region_id !== selectedRegionId) return false;
+    if (hasShipFilter && !killMatchesShipFilter(k, shipFilterIds, selectedTags)) return false;
+    return true;
+  });
 
   function handleRegionSelect(regionId) {
     selectedRegionId = selectedRegionId === regionId ? null : regionId;
@@ -48,14 +65,17 @@
     systemFilter = null;
   }
 
+  function handleShipFilterChange({ ships, tags }) {
+    selectedShips = ships;
+    selectedTags = tags;
+  }
+
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   
-  // Simple hash-based routing
   function handleHashChange() {
     currentPage = 'home';
   }
 
-  // Generate static star positions once
   const staticStars = Array.from({ length: 50 }, () => ({
     size: ['small', 'medium', 'large'][Math.floor(Math.random() * 3)],
     left: Math.random() * 100,
@@ -74,14 +94,12 @@
       loading = false;
       error = null;
       
-      // Fetch region stats
       const regionsResponse = await fetch(`${API_URL}/api/regions`);
       if (regionsResponse.ok) {
         const regionsData = await regionsResponse.json();
         regions = regionsData.regions || [];
       }
       
-      // Check connection status
       const healthResponse = await fetch(`${API_URL}/api/health`);
       if (healthResponse.ok) {
         const healthData = await healthResponse.json();
@@ -108,12 +126,25 @@
     }
   }
 
+  async function fetchShipNames() {
+    try {
+      const resp = await fetch(`${API_URL}/api/ships/names`);
+      if (resp.ok) {
+        const data = await resp.json();
+        allShips = data.ships || [];
+      }
+    } catch (err) {
+      console.error('Error fetching ship names:', err);
+    }
+  }
+
   onMount(() => {
     handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
     
     fetchKills();
     fetchSystemNames();
+    fetchShipNames();
     pollInterval = setInterval(fetchKills, 2000);
   });
 
@@ -207,8 +238,12 @@
         <aside class="sidebar">
           <SystemSearch
             {allSystems}
+            {allShips}
+            {selectedShips}
+            {selectedTags}
             onSystemSelect={handleSystemSelect}
             onClearSystem={handleClearSystem}
+            onShipFilterChange={handleShipFilterChange}
             activeFilter={systemFilter}
           />
 

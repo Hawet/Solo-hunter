@@ -9,6 +9,67 @@ from typing import List, Dict, Optional, Set, Tuple
 from datetime import datetime
 from pathlib import Path
 
+# EVE Online group_id -> (ship_class_name, size, tier)
+# Size: small (frigate/destroyer), medium (cruiser/BC), large (battleship), capital
+# Tier: t1, t2, t3, faction
+_GROUP_SHIP_META: Dict[int, Tuple[str, str, str]] = {
+    # -- small --
+    25:   ("Frigate",                "small",   "t1"),
+    324:  ("Assault Frigate",        "small",   "t2"),
+    831:  ("Covert Ops",             "small",   "t2"),
+    834:  ("Stealth Bomber",         "small",   "t2"),
+    893:  ("Electronic Attack Ship",  "small",   "t2"),
+    830:  ("Interceptor",            "small",   "t2"),
+    1527: ("Logistics Frigate",      "small",   "t2"),
+    420:  ("Destroyer",              "small",   "t1"),
+    541:  ("Interdictor",            "small",   "t2"),
+    1534: ("Command Destroyer",      "small",   "t2"),
+    1305: ("Tactical Destroyer",     "small",   "t3"),
+    # -- medium --
+    26:   ("Cruiser",                "medium",  "t1"),
+    358:  ("Heavy Assault Cruiser",  "medium",  "t2"),
+    894:  ("Heavy Interdictor",      "medium",  "t2"),
+    906:  ("Combat Recon Ship",      "medium",  "t2"),
+    833:  ("Force Recon Ship",       "medium",  "t2"),
+    832:  ("Logistics Cruiser",      "medium",  "t2"),
+    963:  ("Strategic Cruiser",      "medium",  "t3"),
+    419:  ("Battlecruiser",          "medium",  "t1"),
+    540:  ("Command Ship",           "medium",  "t2"),
+    # -- large --
+    27:   ("Battleship",             "large",   "t1"),
+    898:  ("Black Ops",              "large",   "t2"),
+    900:  ("Marauder",               "large",   "t2"),
+    # -- capital --
+    547:  ("Carrier",                "capital",  "t1"),
+    485:  ("Dreadnought",            "capital",  "t1"),
+    659:  ("Supercarrier",           "capital",  "t1"),
+    30:   ("Titan",                  "capital",  "t1"),
+    1538: ("Force Auxiliary",        "capital",  "t1"),
+    883:  ("Capital Industrial Ship","capital",  "t1"),
+    # -- misc flyable hulls (size based on class feel) --
+    31:   ("Shuttle",                "small",   "t1"),
+    237:  ("Rookie Ship",            "small",   "t1"),
+    1283: ("Expedition Frigate",     "small",   "t1"),
+    543:  ("Exhumer",                "medium",  "t2"),
+    463:  ("Mining Barge",           "medium",  "t1"),
+    941:  ("Industrial Command Ship","large",   "t1"),
+    513:  ("Freighter",              "capital",  "t1"),
+    902:  ("Jump Freighter",         "capital",  "t2"),
+    380:  ("Transport Ship",         "medium",  "t2"),
+    28:   ("Industrial",             "medium",  "t1"),
+    1972: ("Flag Cruiser",           "medium",  "t2"),
+}
+
+# Faction ship detection: Navy Issue / Fleet Issue / Pirate names in the ship name,
+# or meta_group_id == 4 from ESI.  We also accept certain group_ids that are
+# *exclusively* faction (SOE ships use normal group ids but have meta_group 4).
+_FACTION_NAME_HINTS = frozenset([
+    "navy", "fleet issue", "issue", "pirate",
+    "guristas", "sansha", "blood raider", "serpentis", "angel",
+    "mordu", "sisters", "soe", "concord",
+])
+
+
 class ZKillboardRedisQ:
     """
     RedisQ client for zkillboard.com to receive real-time kill data
@@ -46,11 +107,13 @@ class ZKillboardRedisQ:
         self.cache_dir.mkdir(exist_ok=True)
         self.items_cache_file = self.cache_dir / "items.json"
         self.ships_cache_file = self.cache_dir / "ships.json"
+        self.ship_meta_cache_file = self.cache_dir / "ship_meta.json"
         self.map_cache_file = self.cache_dir / "map_data.json"
         
         # In-memory caches (loaded from files)
         self.items_cache: Dict[int, str] = {}  # type_id -> name
         self.ships_cache: Dict[int, str] = {}  # type_id -> name
+        self.ship_meta_cache: Dict[str, Dict] = {}  # str(type_id) -> {name, group_id, tags:[]}
         self.map_cache: Dict = {}  # Full map data cache
         
         # Derived structures built from map_cache
@@ -58,11 +121,15 @@ class ZKillboardRedisQ:
         self._systems_index: List[Tuple[str, int]] = []  # sorted (name_lower, system_id)
         self._systems_by_id: Dict[int, Dict] = {}  # system_id -> {system_id, name, region_id, security_status}
         
+        # Ship metadata search index (built after loading cache)
+        self._ship_meta_index: List[Tuple[str, int]] = []  # sorted (name_lower, type_id)
+        self._ship_meta_by_id: Dict[int, Dict] = {}  # type_id -> full meta entry
+        
         # Load existing caches
         self._load_cache()
         
     def _load_cache(self):
-        """Load cached items, ships, and map data from JSON files"""
+        """Load cached items, ships, ship_meta, and map data from JSON files"""
         try:
             if self.items_cache_file.exists():
                 with open(self.items_cache_file, 'r', encoding='utf-8') as f:
@@ -82,6 +149,15 @@ class ZKillboardRedisQ:
             self.ships_cache = {}
         
         try:
+            if self.ship_meta_cache_file.exists():
+                with open(self.ship_meta_cache_file, 'r', encoding='utf-8') as f:
+                    self.ship_meta_cache = json.load(f)
+                print(f"Loaded {len(self.ship_meta_cache)} ship metadata entries from cache")
+        except Exception as e:
+            print(f"Error loading ship_meta cache: {e}")
+            self.ship_meta_cache = {}
+        
+        try:
             if self.map_cache_file.exists():
                 with open(self.map_cache_file, 'r', encoding='utf-8') as f:
                     self.map_cache = json.load(f)
@@ -93,6 +169,7 @@ class ZKillboardRedisQ:
             self.map_cache = {'systems': {}, 'stargates': {}, 'regions': {}}
         
         self._build_derived_structures()
+        self._build_ship_meta_index()
     
     def _save_items_cache(self):
         """Save items cache to JSON file"""
@@ -118,6 +195,141 @@ class ZKillboardRedisQ:
         except Exception as e:
             print(f"Error saving map cache: {e}")
     
+    def _save_ship_meta_cache(self):
+        """Save ship metadata cache to JSON file"""
+        try:
+            with open(self.ship_meta_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.ship_meta_cache, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving ship_meta cache: {e}")
+
+    # ---- Ship metadata / tag helpers ----
+
+    @staticmethod
+    def _derive_ship_tags(name: str, group_id: int, meta_group_id: Optional[int] = None) -> List[str]:
+        """Derive tier/size/class tags from ESI group_id and meta_group_id."""
+        tags: List[str] = []
+        meta = _GROUP_SHIP_META.get(group_id)
+        if meta:
+            ship_class, size, tier = meta
+            tags.append(size)
+
+            is_faction = (meta_group_id == 4) or any(h in name.lower() for h in _FACTION_NAME_HINTS)
+            if is_faction and tier == "t1":
+                tags.append("faction")
+            else:
+                tags.append(tier)
+
+            tags.append(ship_class.lower())
+        return tags
+
+    def _build_ship_meta_index(self):
+        """Build sorted search index from the ship_meta_cache for fast autocomplete."""
+        index: List[Tuple[str, int]] = []
+        by_id: Dict[int, Dict] = {}
+        for tid_str, entry in self.ship_meta_cache.items():
+            tid = int(tid_str)
+            name = entry.get("name", "")
+            if not name:
+                continue
+            by_id[tid] = {
+                "type_id": tid,
+                "name": name,
+                "group_id": entry.get("group_id"),
+                "tags": entry.get("tags", []),
+            }
+            index.append((name.lower(), tid))
+        index.sort(key=lambda x: x[0])
+        self._ship_meta_index = index
+        self._ship_meta_by_id = by_id
+        print(f"Built ship meta search index: {len(index)} entries")
+
+    async def _ensure_ship_meta(self, ship_type_id: int) -> Optional[Dict]:
+        """Fetch & cache ESI type metadata for a ship so tags are available.
+        Returns the cached meta entry or None on failure."""
+        tid_str = str(ship_type_id)
+        if tid_str in self.ship_meta_cache:
+            return self.ship_meta_cache[tid_str]
+
+        if not self.session:
+            return None
+
+        try:
+            url = f"{self.esi_base_url}/v3/universe/types/{ship_type_id}/"
+            async with self.session.get(url) as response:
+                if response.status != 200:
+                    return None
+                type_data = await response.json()
+                name = type_data.get("name", f"Ship {ship_type_id}")
+                group_id = type_data.get("group_id")
+                meta_group_id = type_data.get("meta_group_id")
+                tags = self._derive_ship_tags(name, group_id, meta_group_id)
+                entry = {
+                    "name": name,
+                    "group_id": group_id,
+                    "meta_group_id": meta_group_id,
+                    "tags": tags,
+                }
+                self.ship_meta_cache[tid_str] = entry
+                self._save_ship_meta_cache()
+
+                tid = int(ship_type_id)
+                self._ship_meta_by_id[tid] = {
+                    "type_id": tid,
+                    "name": name,
+                    "group_id": group_id,
+                    "tags": tags,
+                }
+                entry_key = (name.lower(), tid)
+                insert_pos = bisect.bisect_left(self._ship_meta_index, entry_key)
+                if insert_pos >= len(self._ship_meta_index) or self._ship_meta_index[insert_pos] != entry_key:
+                    self._ship_meta_index.insert(insert_pos, entry_key)
+
+                return entry
+        except Exception as e:
+            print(f"Error fetching ship meta for {ship_type_id}: {e}")
+            return None
+
+    def get_ship_tags(self, ship_type_id: int) -> List[str]:
+        """Return cached tags for a ship type, or empty list if unknown."""
+        entry = self.ship_meta_cache.get(str(ship_type_id))
+        return entry.get("tags", []) if entry else []
+
+    def search_ships(self, query: str, limit: int = 15) -> List[Dict]:
+        """Search ship types by name (prefix + substring). Returns list of meta dicts."""
+        if not query:
+            return []
+        q = query.lower()
+        results: List[Dict] = []
+        seen: Set[int] = set()
+
+        lo = bisect.bisect_left(self._ship_meta_index, (q,))
+        for i in range(lo, len(self._ship_meta_index)):
+            name_lower, tid = self._ship_meta_index[i]
+            if not name_lower.startswith(q):
+                break
+            if tid not in seen:
+                seen.add(tid)
+                results.append(self._ship_meta_by_id[tid])
+            if len(results) >= limit:
+                return results
+
+        if len(results) < limit:
+            for name_lower, tid in self._ship_meta_index:
+                if tid in seen:
+                    continue
+                if q in name_lower:
+                    seen.add(tid)
+                    results.append(self._ship_meta_by_id[tid])
+                    if len(results) >= limit:
+                        break
+
+        return results
+
+    def get_all_ship_types(self) -> List[Dict]:
+        """Return all known ship types for client-side autocomplete."""
+        return list(self._ship_meta_by_id.values())
+
     @staticmethod
     def _is_kspace_region(region_id) -> bool:
         """Return True for known-space regions (filter out WH, VR, ADR)"""
@@ -133,9 +345,28 @@ class ZKillboardRedisQ:
         return True
 
     def _build_derived_structures(self):
-        """Build adjacency list and systems search index from map_cache."""
+        """Build adjacency list, systems search index, and seed ship meta from ships_cache."""
         self._build_adjacency()
         self._build_systems_index()
+        self._seed_ship_meta_from_names()
+
+    def _seed_ship_meta_from_names(self):
+        """Ensure every entry in ships_cache has a corresponding ship_meta_cache entry.
+        Uses name-only heuristic (no ESI call) so it works offline at startup."""
+        added = 0
+        for tid_str, name in self.ships_cache.items():
+            if tid_str in self.ship_meta_cache:
+                continue
+            self.ship_meta_cache[tid_str] = {
+                "name": name,
+                "group_id": None,
+                "meta_group_id": None,
+                "tags": [],
+            }
+            added += 1
+        if added:
+            self._save_ship_meta_cache()
+            print(f"Seeded {added} ship_meta entries from ships_cache (tags pending ESI lookup)")
 
     def _build_adjacency(self):
         self.adjacency = {}
@@ -396,16 +627,19 @@ class ZKillboardRedisQ:
             return {}
     
     async def _get_ship_info(self, ship_type_id: int) -> Dict:
-        """Get ship type information including name (with caching)"""
-        # Check cache first
+        """Get ship type information including name and tags (with caching)"""
+        await self._ensure_ship_meta(ship_type_id)
+        tags = self.get_ship_tags(ship_type_id)
+
         if ship_type_id in self.ships_cache:
             return {
                 "name": self.ships_cache[ship_type_id],
-                "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
+                "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon",
+                "tags": tags,
             }
         
         if not self.session:
-            return {"name": f"Ship {ship_type_id}", "icon_url": None}
+            return {"name": f"Ship {ship_type_id}", "icon_url": None, "tags": tags}
         
         try:
             url = f"{self.esi_base_url}/v3/universe/types/{ship_type_id}/"
@@ -414,25 +648,26 @@ class ZKillboardRedisQ:
                     type_data = await response.json()
                     ship_name = type_data.get('name', f"Ship {ship_type_id}")
                     
-                    # Cache the result
                     self.ships_cache[ship_type_id] = ship_name
                     self._save_ships_cache()
                     
                     return {
                         "name": ship_name,
-                        "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
+                        "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon",
+                        "tags": tags,
                     }
                 else:
-                    # Fallback: just return icon URL even if type lookup fails
                     return {
                         "name": f"Ship {ship_type_id}",
-                        "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
+                        "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon",
+                        "tags": tags,
                     }
         except Exception as e:
             print(f"Error fetching ship info: {e}")
             return {
                 "name": f"Ship {ship_type_id}",
-                "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon"
+                "icon_url": f"{self.image_cdn}/types/{ship_type_id}/icon",
+                "tags": tags,
             }
     
     async def _get_item_name(self, item_type_id: int) -> str:
@@ -606,6 +841,7 @@ class ZKillboardRedisQ:
                         "ship_type_id": attacker.get('ship_type_id'),
                         "ship_name": attacker_ship_info_full.get('name') if attacker_ship_info_full else None,
                         "ship_icon": attacker_ship_info_full.get('icon_url') if attacker_ship_info_full else None,
+                        "ship_tags": attacker_ship_info_full.get('tags', []) if attacker_ship_info_full else [],
                         "damage_done": attacker.get('damage_done', 0),
                         "final_blow": attacker.get('final_blow', False)
                     })
@@ -679,6 +915,7 @@ class ZKillboardRedisQ:
                         "ship_type_id": victim.get('ship_type_id'),
                         "ship_name": victim_ship_info.get('name'),
                         "ship_icon": victim_ship_info.get('icon_url'),
+                        "ship_tags": victim_ship_info.get('tags', []),
                         "damage_taken": victim.get('damage_taken', 0),
                         "fit": fit_items
                     },
@@ -692,6 +929,7 @@ class ZKillboardRedisQ:
                         "ship_type_id": final_blow_attacker.get('ship_type_id') if final_blow_attacker else None,
                         "ship_name": attacker_ship_info.get('name') if attacker_ship_info else None,
                         "ship_icon": attacker_ship_info.get('icon_url') if attacker_ship_info else None,
+                        "ship_tags": attacker_ship_info.get('tags', []) if attacker_ship_info else [],
                         "damage_done": final_blow_attacker.get('damage_done', 0) if final_blow_attacker else 0
                     },
                     "zkb": {
