@@ -1,9 +1,11 @@
 import asyncio
+import bisect
 import json
 import aiohttp
 import uuid
 import os
-from typing import List, Dict, Optional
+from collections import deque
+from typing import List, Dict, Optional, Set, Tuple
 from datetime import datetime
 from pathlib import Path
 
@@ -51,6 +53,11 @@ class ZKillboardRedisQ:
         self.ships_cache: Dict[int, str] = {}  # type_id -> name
         self.map_cache: Dict = {}  # Full map data cache
         
+        # Derived structures built from map_cache
+        self.adjacency: Dict[int, Set[int]] = {}
+        self._systems_index: List[Tuple[str, int]] = []  # sorted (name_lower, system_id)
+        self._systems_by_id: Dict[int, Dict] = {}  # system_id -> {system_id, name, region_id, security_status}
+        
         # Load existing caches
         self._load_cache()
         
@@ -84,6 +91,8 @@ class ZKillboardRedisQ:
         except Exception as e:
             print(f"Error loading map cache: {e}")
             self.map_cache = {'systems': {}, 'stargates': {}, 'regions': {}}
+        
+        self._build_derived_structures()
     
     def _save_items_cache(self):
         """Save items cache to JSON file"""
@@ -109,6 +118,127 @@ class ZKillboardRedisQ:
         except Exception as e:
             print(f"Error saving map cache: {e}")
     
+    @staticmethod
+    def _is_kspace_region(region_id) -> bool:
+        """Return True for known-space regions (filter out WH, VR, ADR)"""
+        if region_id is None:
+            return False
+        rid = int(region_id)
+        if 11000000 <= rid < 12000000:  # Wormhole
+            return False
+        if 12000000 <= rid < 13000000:  # Abyssal Deadspace
+            return False
+        if 14000000 <= rid < 15000000:  # Victory Road
+            return False
+        return True
+
+    def _build_derived_structures(self):
+        """Build adjacency list and systems search index from map_cache."""
+        self._build_adjacency()
+        self._build_systems_index()
+
+    def _build_adjacency(self):
+        self.adjacency = {}
+        for sg in self.map_cache.get('stargates', {}).values():
+            f = sg.get('from_system_id')
+            t = sg.get('to_system_id')
+            if f and t:
+                self.adjacency.setdefault(f, set()).add(t)
+                self.adjacency.setdefault(t, set()).add(f)
+        print(f"Built adjacency list: {len(self.adjacency)} systems with gates")
+
+    def _build_systems_index(self):
+        """Pre-build a sorted list of (name_lower, system_id) for fast prefix search,
+        and a lookup dict system_id -> summary for the names endpoint."""
+        index: List[Tuple[str, int]] = []
+        by_id: Dict[int, Dict] = {}
+        for sys_data in self.map_cache.get('systems', {}).values():
+            sid = sys_data.get('system_id')
+            name = sys_data.get('name')
+            rid = sys_data.get('region_id')
+            if not sid or not name:
+                continue
+            if not self._is_kspace_region(rid):
+                continue
+            entry = {
+                "system_id": sid,
+                "name": name,
+                "region_id": rid,
+                "security_status": round(sys_data.get('security_status', 0), 2),
+            }
+            by_id[sid] = entry
+            index.append((name.lower(), sid))
+        index.sort(key=lambda x: x[0])
+        self._systems_index = index
+        self._systems_by_id = by_id
+        print(f"Built systems search index: {len(index)} k-space systems")
+
+    def search_systems(self, query: str, limit: int = 15) -> List[Dict]:
+        """Search systems by name. Prefix match first via bisect, then substring fallback."""
+        if not query:
+            return []
+        q = query.lower()
+        results: List[Dict] = []
+        seen: Set[int] = set()
+
+        # Fast prefix search via bisect
+        lo = bisect.bisect_left(self._systems_index, (q,))
+        for i in range(lo, len(self._systems_index)):
+            name_lower, sid = self._systems_index[i]
+            if not name_lower.startswith(q):
+                break
+            if sid not in seen:
+                seen.add(sid)
+                results.append(self._systems_by_id[sid])
+            if len(results) >= limit:
+                return results
+
+        # Substring fallback (only if we have room)
+        if len(results) < limit:
+            for name_lower, sid in self._systems_index:
+                if sid in seen:
+                    continue
+                if q in name_lower:
+                    seen.add(sid)
+                    results.append(self._systems_by_id[sid])
+                    if len(results) >= limit:
+                        break
+
+        return results
+
+    def get_systems_in_range(self, system_id: int, jumps: int) -> Dict:
+        """BFS from system_id up to `jumps` hops. Returns origin info + list of system_ids."""
+        jumps = max(1, min(jumps, 25))
+        origin = self._systems_by_id.get(system_id)
+        if not origin or system_id not in self.adjacency:
+            return {
+                "origin": {"system_id": system_id, "name": origin["name"] if origin else f"System {system_id}"},
+                "systems": [system_id],
+                "jumps": jumps,
+            }
+
+        visited: Set[int] = {system_id}
+        queue: deque = deque()
+        queue.append((system_id, 0))
+        while queue:
+            current, depth = queue.popleft()
+            if depth >= jumps:
+                continue
+            for neighbor in self.adjacency.get(current, set()):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, depth + 1))
+
+        return {
+            "origin": {"system_id": system_id, "name": origin["name"]},
+            "systems": list(visited),
+            "jumps": jumps,
+        }
+
+    def get_all_system_names(self) -> List[Dict]:
+        """Return all k-space systems for autocomplete."""
+        return list(self._systems_by_id.values())
+
     async def connect(self):
         """Start polling RedisQ for killmails"""
         self._running = True
@@ -789,6 +919,7 @@ class ZKillboardRedisQ:
             
             # Save to file
             self._save_map_cache()
+            self._build_derived_structures()
             
             print(f"Map data cached: {len(systems_data)} systems, {len(stargates_data)} stargates, {len(regions_data)} regions")
             

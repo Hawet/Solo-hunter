@@ -1,18 +1,47 @@
 <script>
   export let regions = [];
+  export let selectedRegionId = null;
+  export let onRegionSelect = () => {};
+  export let disabled = false;
 
-  // Find max count for scaling
   $: maxCount = regions.length > 0 ? Math.max(...regions.map(r => r.count)) : 1;
+  $: selectedRegionName = selectedRegionId
+    ? (regions.find(r => r.region_id === selectedRegionId)?.name ?? null)
+    : null;
 </script>
 
-<div class="region-stats">
+<div class="region-stats" class:disabled>
   <div class="stats-header">
     <h3>Active Regions</h3>
-    <span class="session-label">Current Session</span>
+    <div class="header-right">
+      {#if disabled}
+        <span class="session-label">Overridden by system search</span>
+      {:else if selectedRegionId}
+        <span class="filter-badge">
+          Showing: {selectedRegionName}
+          <button
+            class="clear-filter"
+            on:click={() => onRegionSelect(selectedRegionId)}
+            aria-label="Clear region filter"
+          >&times;</button>
+        </span>
+      {:else}
+        <span class="session-label">Current Session</span>
+      {/if}
+    </div>
   </div>
   <div class="regions-grid">
     {#each regions as region (region.region_id)}
-      <div class="region-card" style="--activity: {region.count / maxCount}">
+      <button
+        class="region-card"
+        class:selected={!disabled && region.region_id === selectedRegionId}
+        class:dimmed={!disabled && selectedRegionId && region.region_id !== selectedRegionId}
+        style="--activity: {region.count / maxCount}"
+        on:click={() => { if (!disabled) onRegionSelect(region.region_id); }}
+        aria-pressed={!disabled && region.region_id === selectedRegionId}
+        aria-disabled={disabled}
+        title={disabled ? 'Clear system search to use region filter' : region.region_id === selectedRegionId ? 'Click to clear filter' : `Filter kills to ${region.name}`}
+      >
         <div class="region-content">
           <div class="region-info">
             <span class="region-name">{region.name}</span>
@@ -25,7 +54,7 @@
             ></div>
           </div>
         </div>
-      </div>
+      </button>
     {/each}
   </div>
 </div>
@@ -39,6 +68,12 @@
     padding: 1.25rem;
     margin-bottom: 1.5rem;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: opacity 0.2s ease;
+  }
+
+  .region-stats.disabled {
+    opacity: 0.45;
+    pointer-events: none;
   }
 
   .stats-header {
@@ -56,12 +91,47 @@
     letter-spacing: -0.01em;
   }
 
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
   .session-label {
     font-size: 0.75rem;
     color: #888;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 500;
+  }
+
+  .filter-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 8px;
+    padding: 0.25rem 0.6rem;
+  }
+
+  .clear-filter {
+    all: unset;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    color: #fca5a5;
+    padding: 0 0.15rem;
+    border-radius: 4px;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+
+  .clear-filter:hover {
+    color: #fff;
+    background: rgba(239, 68, 68, 0.3);
   }
 
   .regions-grid {
@@ -71,6 +141,11 @@
   }
 
   .region-card {
+    all: unset;
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    cursor: pointer;
     background: rgba(15, 15, 23, 0.5);
     border: 1px solid rgba(239, 68, 68, 0.1);
     border-radius: 10px;
@@ -85,6 +160,25 @@
     border-color: rgba(239, 68, 68, 0.4);
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
+  }
+
+  .region-card:focus-visible {
+    outline: 2px solid rgba(239, 68, 68, 0.6);
+    outline-offset: 2px;
+  }
+
+  .region-card.selected {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.6);
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.25), inset 0 0 12px rgba(239, 68, 68, 0.08);
+  }
+
+  .region-card.dimmed {
+    opacity: 0.45;
+  }
+
+  .region-card.dimmed:hover {
+    opacity: 0.75;
   }
 
   .region-content {

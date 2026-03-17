@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import KillList from './components/KillList.svelte';
   import RegionStats from './components/RegionStats.svelte';
+  import SystemSearch from './components/SystemSearch.svelte';
 
   let kills = [];
   let regions = [];
@@ -11,6 +12,41 @@
   let connectionStatus = 'disconnected';
   let isPaused = false;
   let currentPage = 'home';
+  let selectedRegionId = null;
+
+  let allSystems = [];
+  let systemFilter = null;
+
+  $: filteredKills = systemFilter
+    ? kills.filter(k => systemFilter.systemIds.has(k.solar_system_id))
+    : selectedRegionId
+      ? kills.filter(k => k.region_id === selectedRegionId)
+      : kills;
+
+  function handleRegionSelect(regionId) {
+    selectedRegionId = selectedRegionId === regionId ? null : regionId;
+  }
+
+  async function handleSystemSelect({ systemId, systemName, jumps }) {
+    try {
+      const resp = await fetch(`${API_URL}/api/systems/range?system_id=${systemId}&jumps=${jumps}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      systemFilter = {
+        systemId,
+        systemName,
+        jumps,
+        systemIds: new Set(data.systems || []),
+      };
+      selectedRegionId = null;
+    } catch (err) {
+      console.error('Error fetching system range:', err);
+    }
+  }
+
+  function handleClearSystem() {
+    systemFilter = null;
+  }
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   
@@ -60,13 +96,24 @@
     }
   }
 
+  async function fetchSystemNames() {
+    try {
+      const resp = await fetch(`${API_URL}/api/systems/names`);
+      if (resp.ok) {
+        const data = await resp.json();
+        allSystems = data.systems || [];
+      }
+    } catch (err) {
+      console.error('Error fetching system names:', err);
+    }
+  }
+
   onMount(() => {
-    // Set up routing
     handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
     
     fetchKills();
-    // Poll every 2 seconds for new kills
+    fetchSystemNames();
     pollInterval = setInterval(fetchKills, 2000);
   });
 
@@ -153,11 +200,18 @@
       {:else if error}
         <div class="error">Error: {error}</div>
       {:else}
+        <SystemSearch
+          {allSystems}
+          onSystemSelect={handleSystemSelect}
+          onClearSystem={handleClearSystem}
+          activeFilter={systemFilter}
+        />
+
         {#if regions.length > 0}
-          <RegionStats {regions} />
+          <RegionStats {regions} {selectedRegionId} onRegionSelect={handleRegionSelect} disabled={!!systemFilter} />
         {/if}
         
-        <KillList {kills} />
+        <KillList kills={filteredKills} />
       {/if}
     </div>
 </main>

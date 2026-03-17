@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from app.zkillboard import ZKillboardWebSocket
@@ -78,6 +79,34 @@ async def get_region_stats():
     if zkill_ws:
         return {"regions": zkill_ws.get_region_stats()}
     return {"regions": []}
+
+@app.get("/api/systems/names")
+async def get_system_names():
+    """Return all k-space system names for client-side autocomplete.
+    Served with aggressive cache headers since this data is static."""
+    global zkill_ws
+    if zkill_ws:
+        data = zkill_ws.get_all_system_names()
+        resp = JSONResponse(content={"systems": data})
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+    return {"systems": []}
+
+@app.get("/api/systems/search")
+async def search_systems(q: str = Query("", min_length=1), limit: int = Query(15, ge=1, le=50)):
+    """Search systems by name (prefix + substring fallback)"""
+    global zkill_ws
+    if zkill_ws:
+        return {"systems": zkill_ws.search_systems(q, limit)}
+    return {"systems": []}
+
+@app.get("/api/systems/range")
+async def get_systems_in_range(system_id: int = Query(...), jumps: int = Query(10, ge=1, le=25)):
+    """BFS from a system to find all systems within N stargate jumps"""
+    global zkill_ws
+    if zkill_ws:
+        return zkill_ws.get_systems_in_range(system_id, jumps)
+    return {"origin": {"system_id": system_id, "name": f"System {system_id}"}, "systems": [], "jumps": jumps}
 
 @app.get("/api/systems/{system_id}/connections")
 async def get_system_connections(system_id: int):
