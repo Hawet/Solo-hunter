@@ -60,13 +60,16 @@ _GROUP_SHIP_META: Dict[int, Tuple[str, str, str]] = {
     1972: ("Flag Cruiser",           "medium",  "t2"),
 }
 
-# Faction ship detection: Navy Issue / Fleet Issue / Pirate names in the ship name,
-# or meta_group_id == 4 from ESI.  We also accept certain group_ids that are
-# *exclusively* faction (SOE ships use normal group ids but have meta_group 4).
+# Faction ship detection: meta_group_id == 4 from ESI, or name hints, or group-based.
+# Groups in _FACTION_GROUP_IDS contain only non-empire faction ships (e.g. SOE Astero/Stratios/Nestor).
 _FACTION_NAME_HINTS = frozenset([
     "navy", "fleet issue", "issue", "pirate",
     "guristas", "sansha", "blood raider", "serpentis", "angel",
     "mordu", "sisters", "soe", "concord",
+])
+# Group IDs where every ship is faction (e.g. Expedition Frigate = Astero, Stratios, Nestor).
+_FACTION_GROUP_IDS = frozenset([
+    1283,   # Expedition Frigate (SOE: Astero, Stratios, Nestor)
 ])
 
 
@@ -133,7 +136,8 @@ class ZKillboardRedisQ:
         try:
             if self.items_cache_file.exists():
                 with open(self.items_cache_file, 'r', encoding='utf-8') as f:
-                    self.items_cache = json.load(f)
+                    raw = json.load(f)
+                self.items_cache = {int(k): v for k, v in raw.items()}
                 print(f"Loaded {len(self.items_cache)} items from cache")
         except Exception as e:
             print(f"Error loading items cache: {e}")
@@ -142,7 +146,8 @@ class ZKillboardRedisQ:
         try:
             if self.ships_cache_file.exists():
                 with open(self.ships_cache_file, 'r', encoding='utf-8') as f:
-                    self.ships_cache = json.load(f)
+                    raw = json.load(f)
+                self.ships_cache = {int(k): v for k, v in raw.items()}
                 print(f"Loaded {len(self.ships_cache)} ships from cache")
         except Exception as e:
             print(f"Error loading ships cache: {e}")
@@ -151,7 +156,8 @@ class ZKillboardRedisQ:
         try:
             if self.ship_meta_cache_file.exists():
                 with open(self.ship_meta_cache_file, 'r', encoding='utf-8') as f:
-                    self.ship_meta_cache = json.load(f)
+                    raw = json.load(f)
+                self.ship_meta_cache = {str(k): v for k, v in raw.items()}
                 print(f"Loaded {len(self.ship_meta_cache)} ship metadata entries from cache")
         except Exception as e:
             print(f"Error loading ship_meta cache: {e}")
@@ -170,20 +176,30 @@ class ZKillboardRedisQ:
         
         self._build_derived_structures()
         self._build_ship_meta_index()
+        self._rewrite_caches_to_remove_duplicate_keys()
+    
+    def _rewrite_caches_to_remove_duplicate_keys(self):
+        """Rewrite cache JSON files so duplicate keys (from mixed int/str) are removed."""
+        if self.items_cache:
+            self._save_items_cache()
+        if self.ships_cache:
+            self._save_ships_cache()
+        if self.ship_meta_cache:
+            self._save_ship_meta_cache()
     
     def _save_items_cache(self):
-        """Save items cache to JSON file"""
+        """Save items cache to JSON file (string keys so JSON has no duplicate keys)."""
         try:
             with open(self.items_cache_file, 'w', encoding='utf-8') as f:
-                json.dump(self.items_cache, f, indent=2, ensure_ascii=False)
+                json.dump({str(k): v for k, v in self.items_cache.items()}, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Error saving items cache: {e}")
     
     def _save_ships_cache(self):
-        """Save ships cache to JSON file"""
+        """Save ships cache to JSON file (string keys so JSON has no duplicate keys)."""
         try:
             with open(self.ships_cache_file, 'w', encoding='utf-8') as f:
-                json.dump(self.ships_cache, f, indent=2, ensure_ascii=False)
+                json.dump({str(k): v for k, v in self.ships_cache.items()}, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Error saving ships cache: {e}")
     
@@ -196,25 +212,31 @@ class ZKillboardRedisQ:
             print(f"Error saving map cache: {e}")
     
     def _save_ship_meta_cache(self):
-        """Save ship metadata cache to JSON file"""
+        """Save ship metadata cache to JSON file (string keys so JSON has no duplicate keys)."""
         try:
             with open(self.ship_meta_cache_file, 'w', encoding='utf-8') as f:
-                json.dump(self.ship_meta_cache, f, indent=2, ensure_ascii=False)
+                json.dump({str(k): v for k, v in self.ship_meta_cache.items()}, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Error saving ship_meta cache: {e}")
 
     # ---- Ship metadata / tag helpers ----
 
     @staticmethod
-    def _derive_ship_tags(name: str, group_id: int, meta_group_id: Optional[int] = None) -> List[str]:
+    def _derive_ship_tags(name: str, group_id: Optional[int], meta_group_id: Optional[int] = None) -> List[str]:
         """Derive tier/size/class tags from ESI group_id and meta_group_id."""
         tags: List[str] = []
+        if group_id is None:
+            return tags
         meta = _GROUP_SHIP_META.get(group_id)
         if meta:
             ship_class, size, tier = meta
             tags.append(size)
 
-            is_faction = (meta_group_id == 4) or any(h in name.lower() for h in _FACTION_NAME_HINTS)
+            is_faction = (
+                (meta_group_id == 4)
+                or (group_id in _FACTION_GROUP_IDS)
+                or any(h in name.lower() for h in _FACTION_NAME_HINTS)
+            )
             if is_faction and tier == "t1":
                 tags.append("faction")
             else:
@@ -224,29 +246,39 @@ class ZKillboardRedisQ:
         return tags
 
     def _build_ship_meta_index(self):
-        """Build sorted search index from the ship_meta_cache for fast autocomplete."""
+        """Build sorted search index from the ship_meta_cache for fast autocomplete.
+        Recomputes tags so cache entries pick up updated faction logic (e.g. _FACTION_GROUP_IDS)."""
         index: List[Tuple[str, int]] = []
         by_id: Dict[int, Dict] = {}
+        tags_updated = False
         for tid_str, entry in self.ship_meta_cache.items():
             tid = int(tid_str)
             name = entry.get("name", "")
             if not name:
                 continue
+            group_id = entry.get("group_id")
+            meta_group_id = entry.get("meta_group_id")
+            tags = self._derive_ship_tags(name, group_id, meta_group_id)
+            if tags != entry.get("tags", []):
+                entry["tags"] = tags
+                tags_updated = True
             by_id[tid] = {
                 "type_id": tid,
                 "name": name,
-                "group_id": entry.get("group_id"),
-                "tags": entry.get("tags", []),
+                "group_id": group_id,
+                "tags": tags,
             }
             index.append((name.lower(), tid))
         index.sort(key=lambda x: x[0])
         self._ship_meta_index = index
         self._ship_meta_by_id = by_id
+        if tags_updated:
+            self._save_ship_meta_cache()
         print(f"Built ship meta search index: {len(index)} entries")
 
-    async def _ensure_ship_meta(self, ship_type_id: int) -> Optional[Dict]:
+    async def _ensure_ship_meta(self, ship_type_id: int, *, persist: bool = True) -> Optional[Dict]:
         """Fetch & cache ESI type metadata for a ship so tags are available.
-        Returns the cached meta entry or None on failure."""
+        Set persist=False to skip writing to disk (caller saves in bulk)."""
         tid_str = str(ship_type_id)
         if tid_str in self.ship_meta_cache:
             return self.ship_meta_cache[tid_str]
@@ -271,7 +303,8 @@ class ZKillboardRedisQ:
                     "tags": tags,
                 }
                 self.ship_meta_cache[tid_str] = entry
-                self._save_ship_meta_cache()
+                if persist:
+                    self._save_ship_meta_cache()
 
                 tid = int(ship_type_id)
                 self._ship_meta_by_id[tid] = {
@@ -354,7 +387,8 @@ class ZKillboardRedisQ:
         """Ensure every entry in ships_cache has a corresponding ship_meta_cache entry.
         Uses name-only heuristic (no ESI call) so it works offline at startup."""
         added = 0
-        for tid_str, name in self.ships_cache.items():
+        for tid, name in self.ships_cache.items():
+            tid_str = str(tid)
             if tid_str in self.ship_meta_cache:
                 continue
             self.ship_meta_cache[tid_str] = {
@@ -470,6 +504,51 @@ class ZKillboardRedisQ:
         """Return all k-space systems for autocomplete."""
         return list(self._systems_by_id.values())
 
+    async def _populate_all_ship_meta(self):
+        """Fetch all ship type_ids from ESI for every group in _GROUP_SHIP_META,
+        then ensure each one has a ship_meta_cache entry with tags.
+        Runs once in the background so autocomplete covers all ships."""
+        already_cached = set(self.ship_meta_cache.keys())
+        all_type_ids: List[int] = []
+
+        for group_id in _GROUP_SHIP_META:
+            try:
+                url = f"{self.esi_base_url}/v1/universe/groups/{group_id}/"
+                async with self.session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        type_ids = data.get("types", [])
+                        new_ids = [tid for tid in type_ids if str(tid) not in already_cached]
+                        all_type_ids.extend(new_ids)
+                    elif response.status == 429:
+                        await asyncio.sleep(5)
+                await asyncio.sleep(0.05)
+            except Exception as e:
+                print(f"Error fetching group {group_id}: {e}")
+
+        if not all_type_ids:
+            print("Ship meta cache already complete, no new types to fetch")
+            return
+
+        print(f"Populating ship meta for {len(all_type_ids)} uncached ship types...")
+        fetched = 0
+        for tid in all_type_ids:
+            if not self._running:
+                break
+            try:
+                await self._ensure_ship_meta(tid, persist=False)
+                fetched += 1
+                if fetched % 50 == 0:
+                    self._save_ship_meta_cache()
+                    print(f"  ...fetched {fetched}/{len(all_type_ids)} ship types")
+                await asyncio.sleep(0.05)
+            except Exception as e:
+                print(f"Error ensuring ship meta for {tid}: {e}")
+
+        self._save_ship_meta_cache()
+        self._build_ship_meta_index()
+        print(f"Ship meta population complete: {len(self.ship_meta_cache)} total entries")
+
     async def connect(self):
         """Start polling RedisQ for killmails"""
         self._running = True
@@ -483,6 +562,8 @@ class ZKillboardRedisQ:
         
         print(f"Connected to RedisQ with queueID: {self.queue_id}")
         print(f"Polling every {self.ttw} seconds...")
+
+        asyncio.create_task(self._populate_all_ship_meta())
         
         while self._running:
             try:
