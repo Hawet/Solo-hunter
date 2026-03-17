@@ -245,21 +245,10 @@
 
             <!-- VS Divider -->
             <div class="vs-divider">
-              <svg class="swords-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <!-- First sword (diagonal from top-left to bottom-right) -->
-                <path d="M6 3 L18 15 M6 3 L4 5 M6 3 L8 5 M18 15 L16 17 M18 15 L20 17" 
-                      stroke="currentColor" 
-                      stroke-width="2.5" 
-                      stroke-linecap="round" 
-                      stroke-linejoin="round"/>
-                <!-- Second sword (diagonal from top-right to bottom-left) -->
-                <path d="M18 3 L6 15 M18 3 L20 5 M18 3 L16 5 M6 15 L8 17 M6 15 L4 17" 
-                      stroke="currentColor" 
-                      stroke-width="2.5" 
-                      stroke-linecap="round" 
-                      stroke-linejoin="round"/>
-                <!-- Cross point/guard -->
-                <circle cx="12" cy="9" r="2" fill="currentColor" opacity="0.9"/>
+              <svg class="swords-icon" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <g transform="translate(-284, -7599)">
+                  <polygon points="301.174002 7614.75989 303.9996 7617.58563 302.586801 7618.9995 299.761203 7616.17276 298.348404 7617.58563 296.934605 7616.17276 298.348404 7614.75989 294.0001 7609.98371 289.651796 7614.75989 291.064595 7616.17276 289.651796 7617.58563 288.238997 7616.17276 285.413398 7618.9995 283.9996 7617.58563 286.826197 7614.75989 285.413398 7613.34702 286.826197 7611.93415 288.238997 7613.34702 293.063895 7608.95554 283.9996 7598.9995 294.0001 7608.10322 303.9996 7598.9995 294.936304 7608.95554 299.761203 7613.34702 301.174002 7611.93415 302.586801 7613.34702" />
+                </g>
               </svg>
             </div>
 

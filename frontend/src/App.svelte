@@ -113,20 +113,16 @@
 <main>
   <header>
     <div class="logo-container">
-      <svg class="logo" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-        <!-- Crosshair/Target -->
-        <circle cx="60" cy="60" r="45" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
-        <circle cx="60" cy="60" r="30" fill="none" stroke="currentColor" stroke-width="2" opacity="0.5"/>
-        <circle cx="60" cy="60" r="15" fill="none" stroke="currentColor" stroke-width="2"/>
-        <!-- Cross lines -->
-        <line x1="60" y1="15" x2="60" y2="45" stroke="currentColor" stroke-width="2"/>
-        <line x1="60" y1="75" x2="60" y2="105" stroke="currentColor" stroke-width="2"/>
-        <line x1="15" y1="60" x2="45" y2="60" stroke="currentColor" stroke-width="2"/>
-        <line x1="75" y1="60" x2="105" y2="60" stroke="currentColor" stroke-width="2"/>
-        <!-- Center dot -->
-        <circle cx="60" cy="60" r="3" fill="currentColor"/>
-        <!-- Arrow/Indicator -->
-        <path d="M 60 15 L 50 25 L 55 25 L 55 35 L 65 35 L 65 25 L 70 25 Z" fill="currentColor" opacity="0.8"/>
+      <svg class="logo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+        <!-- Crosshair circle -->
+        <circle cx="32" cy="32" r="20" stroke="currentColor" stroke-width="4" fill="none"/>
+        <!-- Crosshair ticks -->
+        <line x1="32" y1="4" x2="32" y2="12" stroke="currentColor" stroke-width="4"/>
+        <line x1="32" y1="52" x2="32" y2="60" stroke="currentColor" stroke-width="4"/>
+        <line x1="4" y1="32" x2="12" y2="32" stroke="currentColor" stroke-width="4"/>
+        <line x1="52" y1="32" x2="60" y2="32" stroke="currentColor" stroke-width="4"/>
+        <!-- Ship -->
+        <path d="M36 26 L46 32 L36 38 L38 32 Z" fill="currentColor"/>
       </svg>
       <h1>Solo Hunter</h1>
     </div>
