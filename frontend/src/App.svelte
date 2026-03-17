@@ -194,26 +194,34 @@
       </div>
   </header>
 
-    <div class="container">
-      {#if loading}
+    {#if loading}
+      <div class="container">
         <div class="loading">Loading recent kills...</div>
-      {:else if error}
+      </div>
+    {:else if error}
+      <div class="container">
         <div class="error">Error: {error}</div>
-      {:else}
-        <SystemSearch
-          {allSystems}
-          onSystemSelect={handleSystemSelect}
-          onClearSystem={handleClearSystem}
-          activeFilter={systemFilter}
-        />
+      </div>
+    {:else}
+      <div class="page-layout">
+        <aside class="sidebar">
+          <SystemSearch
+            {allSystems}
+            onSystemSelect={handleSystemSelect}
+            onClearSystem={handleClearSystem}
+            activeFilter={systemFilter}
+          />
 
-        {#if regions.length > 0}
-          <RegionStats {regions} {selectedRegionId} onRegionSelect={handleRegionSelect} disabled={!!systemFilter} />
-        {/if}
-        
-        <KillList kills={filteredKills} />
-      {/if}
-    </div>
+          {#if regions.length > 0}
+            <RegionStats {regions} {selectedRegionId} onRegionSelect={handleRegionSelect} disabled={!!systemFilter} />
+          {/if}
+        </aside>
+
+        <div class="main-content">
+          <KillList kills={filteredKills} />
+        </div>
+      </div>
+    {/if}
 </main>
 
 <style>
@@ -335,7 +343,7 @@
   }
 
   main {
-    max-width: 1200px;
+    max-width: 1400px;
     margin: 0 auto;
     padding: 2rem;
     position: relative;
@@ -532,7 +540,43 @@
     border: 1px solid rgba(239, 68, 68, 0.15);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
-  
+
+  .page-layout {
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+  }
+
+  .sidebar {
+    width: 320px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 1.5rem;
+    z-index: 10;
+  }
+
+  .main-content {
+    flex: 1;
+    min-width: 0;
+    background: rgba(15, 15, 23, 0.7);
+    border-radius: 16px;
+    padding: 1.5rem;
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  @media (max-width: 900px) {
+    .page-layout {
+      flex-direction: column;
+    }
+
+    .sidebar {
+      width: 100%;
+      position: static;
+      max-height: none;
+    }
+  }
 
   .loading,
   .error {
