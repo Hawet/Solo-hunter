@@ -10,7 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 # EVE Online group_id -> (ship_class_name, size, tier)
-# Size: small (frigate/destroyer), medium (cruiser/BC), large (battleship), capital
+# Taxonomy aligns with player-facing hull classes (see e.g. List of spaceships on EVE wiki).
+# Size: small (frigate/destroyer/corvette), medium (cruiser/BC), large (battleship), capital
 # Tier: t1, t2, t3, faction
 _GROUP_SHIP_META: Dict[int, Tuple[str, str, str]] = {
     # -- small --
@@ -48,7 +49,7 @@ _GROUP_SHIP_META: Dict[int, Tuple[str, str, str]] = {
     883:  ("Capital Industrial Ship","capital",  "t1"),
     # -- misc flyable hulls (size based on class feel) --
     31:   ("Shuttle",                "small",   "t1"),
-    237:  ("Rookie Ship",            "small",   "t1"),
+    237:  ("Corvette",               "small",   "t1"),  # rookie / corvette hulls
     1283: ("Expedition Frigate",     "small",   "t1"),
     543:  ("Exhumer",                "medium",  "t2"),
     463:  ("Mining Barge",           "medium",  "t1"),
@@ -278,13 +279,17 @@ class ZKillboardRedisQ:
 
     async def _ensure_ship_meta(self, ship_type_id: int, *, persist: bool = True) -> Optional[Dict]:
         """Fetch & cache ESI type metadata for a ship so tags are available.
-        Set persist=False to skip writing to disk (caller saves in bulk)."""
+        Set persist=False to skip writing to disk (caller saves in bulk).
+        Entries seeded with group_id=null must be refetched — otherwise tier/size tags stay empty forever."""
         tid_str = str(ship_type_id)
         if tid_str in self.ship_meta_cache:
-            return self.ship_meta_cache[tid_str]
+            existing = self.ship_meta_cache[tid_str]
+            if existing.get("group_id") is not None:
+                return existing
+            # Stale placeholder from _seed_ship_meta_from_names; fall through to ESI.
 
         if not self.session:
-            return None
+            return self.ship_meta_cache.get(tid_str)
 
         try:
             url = f"{self.esi_base_url}/v3/universe/types/{ship_type_id}/"
@@ -504,12 +509,17 @@ class ZKillboardRedisQ:
         """Return all k-space systems for autocomplete."""
         return list(self._systems_by_id.values())
 
+    def _ship_meta_needs_esi(self, type_id: int) -> bool:
+        tid_str = str(type_id)
+        ent = self.ship_meta_cache.get(tid_str)
+        return ent is None or ent.get("group_id") is None
+
     async def _populate_all_ship_meta(self):
         """Fetch all ship type_ids from ESI for every group in _GROUP_SHIP_META,
         then ensure each one has a ship_meta_cache entry with tags.
         Runs once in the background so autocomplete covers all ships."""
-        already_cached = set(self.ship_meta_cache.keys())
         all_type_ids: List[int] = []
+        seen: Set[int] = set()
 
         for group_id in _GROUP_SHIP_META:
             try:
@@ -518,19 +528,31 @@ class ZKillboardRedisQ:
                     if response.status == 200:
                         data = await response.json()
                         type_ids = data.get("types", [])
-                        new_ids = [tid for tid in type_ids if str(tid) not in already_cached]
-                        all_type_ids.extend(new_ids)
+                        for tid in type_ids:
+                            if tid in seen:
+                                continue
+                            if self._ship_meta_needs_esi(tid):
+                                seen.add(tid)
+                                all_type_ids.append(tid)
                     elif response.status == 429:
                         await asyncio.sleep(5)
                 await asyncio.sleep(0.05)
             except Exception as e:
                 print(f"Error fetching group {group_id}: {e}")
 
+        # Ships seen in kills but still placeholders (not always listed under standard combat groups)
+        for tid in list(self.ships_cache.keys()):
+            if tid in seen:
+                continue
+            if self._ship_meta_needs_esi(tid):
+                seen.add(tid)
+                all_type_ids.append(tid)
+
         if not all_type_ids:
-            print("Ship meta cache already complete, no new types to fetch")
+            print("Ship meta cache already complete (all mapped types have ESI group_id)")
             return
 
-        print(f"Populating ship meta for {len(all_type_ids)} uncached ship types...")
+        print(f"Populating ship meta for {len(all_type_ids)} ship types (new or incomplete cache)...")
         fetched = 0
         for tid in all_type_ids:
             if not self._running:
@@ -1036,9 +1058,24 @@ class ZKillboardRedisQ:
             except Exception as e:
                 print(f"Error processing kill: {e}")
     
+    def _refresh_kill_ship_tags(self, kill: Dict) -> None:
+        """Re-attach tags from ship_meta so filters work after backfill (stale kills had empty tags)."""
+        v = kill.get("victim") or {}
+        if v.get("ship_type_id"):
+            v["ship_tags"] = self.get_ship_tags(int(v["ship_type_id"]))
+        a = kill.get("attacker") or {}
+        if a.get("ship_type_id"):
+            a["ship_tags"] = self.get_ship_tags(int(a["ship_type_id"]))
+        for att in kill.get("all_attackers") or []:
+            if att.get("ship_type_id"):
+                att["ship_tags"] = self.get_ship_tags(int(att["ship_type_id"]))
+
     def get_recent_kills(self) -> List[Dict]:
-        """Get the list of recent kills (thread-safe)"""
-        return self.recent_kills.copy()
+        """Get the list of recent kills (thread-safe), with ship tags refreshed from current meta cache."""
+        kills = self.recent_kills.copy()
+        for k in kills:
+            self._refresh_kill_ship_tags(k)
+        return kills
     
     def get_region_stats(self) -> List[Dict]:
         """Get region statistics sorted by activity (most active first)"""
