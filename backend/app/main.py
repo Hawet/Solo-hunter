@@ -80,6 +80,14 @@ async def get_region_stats():
         return {"regions": zkill_ws.get_region_stats()}
     return {"regions": []}
 
+@app.get("/api/gangs")
+async def get_active_gangs():
+    """Detect active gangs from the current kill feed"""
+    global zkill_ws
+    if zkill_ws:
+        return {"gangs": zkill_ws.get_active_gangs()}
+    return {"gangs": []}
+
 @app.get("/api/systems/names")
 async def get_system_names():
     """Return all k-space system names for client-side autocomplete.

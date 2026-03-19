@@ -3,9 +3,11 @@
   import KillList from './components/KillList.svelte';
   import RegionStats from './components/RegionStats.svelte';
   import SystemSearch from './components/SystemSearch.svelte';
+  import ActiveGangs from './components/ActiveGangs.svelte';
 
   let kills = [];
   let regions = [];
+  let gangs = [];
   let loading = true;
   let error = null;
   let pollInterval;
@@ -19,6 +21,7 @@
   let systemFilter = null;
   let selectedShips = [];
   let selectedTags = [];
+  let selectedGang = null;
 
   function killMatchesShipFilter(kill, shipIds, tags) {
     const attackerId = kill.attacker?.ship_type_id;
@@ -33,10 +36,19 @@
   $: shipFilterIds = new Set(selectedShips.map(s => s.type_id));
   $: hasShipFilter = selectedShips.length > 0 || selectedTags.length > 0;
 
+  $: selectedGangKillIds = selectedGang ? new Set(selectedGang.kill_ids) : null;
+
   $: filteredKills = kills.filter(k => {
+    if (selectedGangKillIds) return selectedGangKillIds.has(k.killmail_id);
     if (systemFilter && !systemFilter.systemIds.has(k.solar_system_id)) return false;
     if (!systemFilter && selectedRegionId && k.region_id !== selectedRegionId) return false;
     if (hasShipFilter && !killMatchesShipFilter(k, shipFilterIds, selectedTags)) return false;
+    return true;
+  });
+
+  $: filteredGangs = gangs.filter(g => {
+    if (systemFilter && !systemFilter.systemIds.has(g.last_solar_system_id)) return false;
+    if (!systemFilter && selectedRegionId && g.last_region_id !== selectedRegionId) return false;
     return true;
   });
 
@@ -70,6 +82,10 @@
     selectedTags = tags;
   }
 
+  function handleGangSelect(gang) {
+    selectedGang = selectedGang === gang ? null : gang;
+  }
+
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   
   function handleHashChange() {
@@ -99,7 +115,13 @@
         const regionsData = await regionsResponse.json();
         regions = regionsData.regions || [];
       }
-      
+
+      const gangsResponse = await fetch(`${API_URL}/api/gangs`);
+      if (gangsResponse.ok) {
+        const gangsData = await gangsResponse.json();
+        gangs = gangsData.gangs || [];
+      }
+
       const healthResponse = await fetch(`${API_URL}/api/health`);
       if (healthResponse.ok) {
         const healthData = await healthResponse.json();
@@ -255,6 +277,10 @@
         <div class="main-content">
           <KillList kills={filteredKills} />
         </div>
+
+        <aside class="sidebar-right">
+          <ActiveGangs gangs={filteredGangs} {selectedGang} onGangSelect={handleGangSelect} />
+        </aside>
       </div>
     {/if}
 </main>
@@ -378,7 +404,7 @@
   }
 
   main {
-    max-width: 1400px;
+    max-width: 1800px;
     margin: 0 auto;
     padding: 2rem;
     position: relative;
@@ -590,6 +616,14 @@
     z-index: 10;
   }
 
+  .sidebar-right {
+    width: 320px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 1.5rem;
+    z-index: 10;
+  }
+
   .main-content {
     flex: 1;
     min-width: 0;
@@ -601,12 +635,13 @@
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 1200px) {
     .page-layout {
       flex-direction: column;
     }
 
-    .sidebar {
+    .sidebar,
+    .sidebar-right {
       width: 100%;
       position: static;
       max-height: none;

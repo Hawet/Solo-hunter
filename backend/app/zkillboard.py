@@ -1,13 +1,55 @@
 import asyncio
 import bisect
+import hashlib
 import json
 import aiohttp
 import uuid
 import os
-from collections import deque
+from collections import Counter, defaultdict, deque
 from typing import List, Dict, Optional, Set, Tuple
 from datetime import datetime
 from pathlib import Path
+
+GANG_EPITHETS: List[str] = list(dict.fromkeys([
+    "Bloodfangs", "Ironclaws", "Skullrenders", "Warborns", "Killshots",
+    "Ravagers", "Blackfangs", "Doomreavers", "Slaughters", "Bonebreakers",
+    "Vileblades", "Grimshots", "Warclaws", "Deathmarks", "Ironfangs",
+    "Nightreavers", "Skullcrushers", "Bloodstorms", "Rageclaws", "Voidkillers",
+    "Warfangs", "Ashenblades", "Bonefangs", "Dreadshots", "Havocs",
+    "Killfangs", "Warreavers", "Bloodclaws", "Grimfangs", "Deathclaws",
+    "Ironreavers", "Skullfangs", "Ragefangs", "Stormkillers", "Vortexblades",
+    "Nightfangs", "Warstorms", "Bonecrushers", "Blackreavers", "Dreadfangs",
+    "Slaystorms", "Bloodreigns", "Doomfangs", "Ironstorms", "Killstorms",
+    "Rageblades", "Deathstorms", "Skullstorms", "Warblades", "Voidfangs",
+    "Ashstorms", "Havocfangs", "Grimstorms", "Boneblades", "Warcries",
+    "Bloodcries", "Doomstorms", "Killreigns", "Ironrages", "Skullrages",
+    "Dreadstorms", "Blackstorms", "Voidstorms", "Nightstorms", "Warspikes",
+    "Bloodspikes", "Killspikes", "Ironspikes", "Skullspikes", "Dreadspikes",
+    "Warflares", "Bloodflares", "Killflares", "Doomflares", "Ironflares",
+    "Skullflares", "Rageflares", "Nightflares", "Voidflares", "Warbursts",
+    "Bloodbursts", "Killbursts", "Skullbursts", "Doombursts", "Ironbursts",
+    "Ragebursts", "Warstrikes", "Bloodstrikes", "Killstrikes", "Doomstrikes",
+    "Ironstrikes", "Skullstrikes", "Ragestrikes", "Voidstrikes", "Nightstrikes",
+    "Warshards", "Bloodshards", "Killshards", "Ironshards", "Skullshards",
+    "Doomshards", "Rageshards", "Voidshards", "Bloodmaws", "Killmaws",
+    "Ironmaws", "Skullmaws", "Doommaws", "Warmaws", "Carnages", "Massacres",
+    "Butcheries", "Annihilators", "Oblivions", "Ruinations", "Devastators",
+    "Terminators", "Exterminators", "Pulverizers", "Incinerators", "Eradicators",
+    "Decimators", "Shatterers", "Cleavers", "Rippers", "Cutters", "Sunders",
+    "Maulers", "Crushers", "Breakers", "Slayers", "Destroyers", "Raveners",
+    "Obliterators", "Nightblades", "Bloodblades", "Ironblades", "Doomblades",
+    "Skullblades", "Voidblades", "Darkblades", "Shadowfangs", "Shadowclaws",
+    "Shadowreavers", "Shadowstrikes", "Shadowstorms", "Shadowkillers",
+    "Darkfangs", "Darkclaws", "Darkreavers", "Darkstorms", "Darkkillers",
+    "Dreadclaws", "Dreadblades", "Dreadkillers", "Dreadreavers",
+    "Voidreavers", "Voidclaws", "Voidcrushers", "Voidmaws",
+    "Ashfangs", "Ashclaws", "Ashreavers", "Ashkillers",
+    "Steelclaws", "Steelfangs", "Steelreavers", "Steelstorms", "Steelkillers",
+    "Frostfangs", "Frostclaws", "Frostreavers", "Frostkillers", "Froststorms",
+    "Hellfangs", "Hellclaws", "Hellreavers", "Hellstorms", "Hellkillers",
+    "Warhounds", "Bloodhounds", "Ironhounds", "Skullhounds", "Doomhounds",
+    "Ragehounds",
+]))
 
 # EVE Online group_id -> (ship_class_name, size, tier)
 # Taxonomy aligns with player-facing hull classes (see e.g. List of spaceships on EVE wiki).
@@ -80,7 +122,7 @@ class ZKillboardRedisQ:
     Uses HTTP polling instead of WebSocket for better reliability
     """
     
-    def __init__(self, max_kills: int = 15, queue_id: Optional[str] = None, ttw: int = 1):
+    def __init__(self, max_kills: int = 100, queue_id: Optional[str] = None, ttw: int = 1):
         # RedisQ endpoint
         self.base_url = "https://zkillredisq.stream/listen.php"
         # ESI endpoint for fetching killmail data
@@ -1092,7 +1134,165 @@ class ZKillboardRedisQ:
         # Sort by count descending
         stats.sort(key=lambda x: x["count"], reverse=True)
         return stats
-    
+
+    @staticmethod
+    def _stable_hash(roster: frozenset) -> int:
+        digest = hashlib.md5(str(sorted(roster)).encode()).hexdigest()
+        return int(digest, 16)
+
+    def get_active_gangs(self) -> List[Dict]:
+        """Detect active gangs from the current kill feed.
+
+        A gang is a core of >=3 players that appear together in >=4 distinct kills.
+        The roster is the *largest* set of players present in *all* kills of the group.
+        Extra attackers on individual kills are allowed.
+        """
+        kills = self.recent_kills.copy()
+        if len(kills) < 4:
+            return []
+
+        kill_attacker_sets = []
+        for kill in kills:
+            ids = frozenset(
+                a["character_id"]
+                for a in (kill.get("all_attackers") or [])
+                if a.get("character_id")
+            )
+            kill_attacker_sets.append(ids)
+
+        # Count how many kills each player appears in, then only consider
+        # players that appear in >=4 kills as potential gang members.
+        player_kill_count: Dict[int, int] = defaultdict(int)
+        for ids in kill_attacker_sets:
+            for pid in ids:
+                player_kill_count[pid] += 1
+        frequent_players = frozenset(
+            pid for pid, cnt in player_kill_count.items() if cnt >= 4
+        )
+
+        # Diagnostic: show top repeat attackers
+        top_repeats = sorted(player_kill_count.items(), key=lambda x: x[1], reverse=True)[:10]
+        if top_repeats and top_repeats[0][1] >= 2:
+            print(f"[Gangs] {len(kills)} kills, {len(player_kill_count)} unique players, "
+                  f"{len(frequent_players)} with >=4 kills. "
+                  f"Top repeats: {[(pid, cnt) for pid, cnt in top_repeats[:5]]}")
+
+        # Build reduced attacker sets containing only frequent players
+        reduced_sets = [ids & frequent_players for ids in kill_attacker_sets]
+
+        seen_rosters: set = set()
+        gangs: Dict[frozenset, List[int]] = {}
+
+        n = len(kills)
+        for i in range(n):
+            if len(reduced_sets[i]) < 3:
+                continue
+            for j in range(i + 1, n):
+                if len(reduced_sets[j]) < 3:
+                    continue
+                seed = kill_attacker_sets[i] & kill_attacker_sets[j] & frequent_players
+                if len(seed) < 3:
+                    continue
+
+                matching_indices = [
+                    k for k in range(n) if seed <= kill_attacker_sets[k]
+                ]
+                if len(matching_indices) < 4:
+                    continue
+
+                roster = kill_attacker_sets[matching_indices[0]]
+                for idx in matching_indices[1:]:
+                    roster = roster & kill_attacker_sets[idx]
+                if len(roster) < 3:
+                    continue
+
+                if roster in seen_rosters:
+                    continue
+
+                final_indices = [
+                    k for k in range(n) if roster <= kill_attacker_sets[k]
+                ]
+                if len(final_indices) < 4:
+                    continue
+
+                seen_rosters.add(roster)
+                gangs[roster] = final_indices
+
+        if gangs:
+            print(f"[Gangs] Found {len(gangs)} candidate gang(s): "
+                  f"{[(len(r), len(ki)) for r, ki in gangs.items()]}")
+        # Deduplicate: each pilot can only belong to one gang (the one with the
+        # most kills).  Sort candidates by kill count descending so the largest
+        # gang claims its pilots first.
+        sorted_gangs = sorted(gangs.items(), key=lambda kv: len(kv[1]), reverse=True)
+        claimed_pilots: Set[int] = set()
+        results = []
+
+        for roster, kill_indices in sorted_gangs:
+            if roster & claimed_pilots:
+                continue
+            claimed_pilots |= roster
+
+            gang_kills = [kills[i] for i in sorted(kill_indices)]
+
+            corp_counter: Counter = Counter()
+            alliance_counter: Counter = Counter()
+            for kill in gang_kills:
+                for att in (kill.get("all_attackers") or []):
+                    if att.get("character_id") not in roster:
+                        continue
+                    if att.get("corporation_name"):
+                        corp_counter[att["corporation_name"]] += 1
+                    if att.get("alliance_name"):
+                        alliance_counter[att["alliance_name"]] += 1
+
+            corporation_name = corp_counter.most_common(1)[0][0] if corp_counter else "Unknown"
+            alliance_name = alliance_counter.most_common(1)[0][0] if alliance_counter else "No alliance"
+
+            region_counter: Counter = Counter()
+            region_names: Dict[int, str] = {}
+            for kill in gang_kills:
+                rid = kill.get("region_id")
+                if rid:
+                    region_counter[rid] += 1
+                    region_names.setdefault(rid, kill.get("region_name") or "Unknown")
+
+            if region_counter:
+                active_region_id = region_counter.most_common(1)[0][0]
+                active_region_name = region_names.get(active_region_id, "Unknown")
+            else:
+                active_region_id = None
+                active_region_name = "Unknown"
+
+            latest_kill = gang_kills[0]
+            last_solar_system_id = latest_kill.get("solar_system_id")
+            last_solar_system_name = latest_kill.get("solar_system_name") or "Unknown"
+            last_region_id = latest_kill.get("region_id")
+            last_region_name = latest_kill.get("region_name") or "Unknown"
+
+            h = self._stable_hash(roster)
+            epithet = GANG_EPITHETS[h % len(GANG_EPITHETS)]
+
+            results.append({
+                "name": f"{epithet} from {corporation_name}, {alliance_name}",
+                "epithet": epithet,
+                "corporation_name": corporation_name,
+                "alliance_name": alliance_name,
+                "active_region_id": active_region_id,
+                "active_region_name": active_region_name,
+                "last_solar_system_id": last_solar_system_id,
+                "last_solar_system_name": last_solar_system_name,
+                "last_region_id": last_region_id,
+                "last_region_name": last_region_name,
+                "kill_count": len(gang_kills),
+                "attacker_count": len(roster),
+                "kill_ids": [k.get("killmail_id") for k in gang_kills],
+                "roster": sorted(roster),
+            })
+
+        results.sort(key=lambda g: g["kill_count"], reverse=True)
+        return results
+
     async def get_system_connections(self, system_id: int) -> List[Dict]:
         """Get stargate connections for a system"""
         if not self.session:
